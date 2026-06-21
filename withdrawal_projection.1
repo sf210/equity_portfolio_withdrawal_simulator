@@ -1,0 +1,182 @@
+.TH WITHDRAWAL_PROJECTION 1 "2026-06-21" "finance/planning/annuity" "Annuity Planning Tools"
+.SH NAME
+withdrawal_projection \- project annuity-equivalent withdrawals from an equity-invested account
+.SH SYNOPSIS
+.B python withdrawal_projection.py
+.I amount age gender state
+.RB [ --joint-age
+.IR AGE ]
+.RB [ --joint-gender
+.IR M|F ]
+.RB [ --years
+.IR N ]
+.RB [ --model
+.IR bootstrap|block|lognormal ]
+.RB [ --block-length
+.IR YEARS ]
+.RB [ --seed
+.IR INT ]
+.SH DESCRIPTION
+.B withdrawal_projection.py
+simulates a single random 30-year path of a retirement strategy that does
+.I not
+buy an annuity but instead keeps the money invested in equities and each year
+withdraws what a life annuity
+.I would
+pay on the current balance.
+.PP
+Starting from
+.IR amount ,
+for each projected year the program:
+.IP 1. 4
+Looks up the monthly life-annuity payout for the current balance at the current
+age via
+.BR annuity_quote (1)
+(immediateannuities.com). Because the payout is linear in the premium, a single
+$100,000 reference quote is fetched per age and scaled to the balance.
+.IP 2. 4
+Withdraws twelve times that monthly payout from the balance.
+.IP 3. 4
+Grows the remaining balance by that year's nominal equity return.
+.IP 4. 4
+Increments the age (and any joint age) by one and repeats.
+.PP
+Equity returns and CPI inflation are drawn
+.I jointly
+from the model selected by
+.B --model
+so the historical equity/inflation correlation is preserved. Results are
+reported both in nominal dollars and in today's (inflation-deflated) dollars.
+.SH OPTIONS
+.TP
+.I amount
+Starting amount invested (premium). Accepts plain digits, commas, or a leading
+"$" (e.g. \fB1000000\fR, \fB1,000,000\fR, \fB$1,000,000\fR). Must be positive.
+.TP
+.I age
+Age today. Integer 40\(en90 (the quote site's supported range).
+.TP
+.I gender
+\fBM\fR or \fBF\fR (\fBmale\fR/\fBfemale\fR also accepted).
+.TP
+.I state
+Two-letter US state code, e.g. \fBFL\fR, or \fBOTHER\fR.
+.TP
+.BI --joint-age " AGE"
+Age of a joint (second) beneficiary, 40\(en90. Switches the quote to a joint-life
+annuity. Must be given together with \fB--joint-gender\fR.
+.TP
+.BI --joint-gender " M|F"
+Gender of the joint beneficiary. Must be given together with \fB--joint-age\fR.
+.TP
+.BI --years " N"
+Number of years to project. Default \fB30\fR.
+.TP
+.BI --model " bootstrap|block|lognormal"
+Equity/inflation return model (see \fBMODELS\fR). Default \fBbootstrap\fR.
+.TP
+.BI --block-length " YEARS"
+Block size in years, used only with \fB--model block\fR. Default \fB5\fR.
+.TP
+.BI --seed " INT"
+Seed for the random number generator, for reproducible paths. Default: random.
+.SH MODELS
+The return models are defined in
+.BR equity_model.py ,
+calibrated to paired S&P 500 nominal total returns and CPI annual-average
+inflation for 1928\(en2025 (see
+.BR market_data.py ).
+.TP
+.B bootstrap
+IID historical bootstrap: each year is an actual historical year-pair drawn with
+replacement. Preserves the empirical distribution (fat left tail, skew, and the
+contemporaneous equity/inflation correlation). Recommended default for tail-risk
+work; serial correlation between years is not preserved.
+.TP
+.B block
+Circular moving-block bootstrap: resamples consecutive runs of
+.B --block-length
+years and stitches them together (wrapping past the end of the series).
+Preserves serial correlation \(em notably the strong year-to-year persistence of
+inflation \(em which widens the left tail of multi-year outcomes. Longer blocks
+preserve more persistence.
+.TP
+.B lognormal
+Draws from a bivariate normal fitted to (log(1+equity), log(1+inflation)).
+Smooth and able to extrapolate beyond observed values, but has zero
+skew/kurtosis and so understates tail risk. The fitted covariance still
+reproduces the historical correlation.
+.SH OUTPUT
+A calibration header (model, sample span, equity arithmetic/geometric mean and
+standard deviation, CPI mean and standard deviation, equity/inflation
+correlation), followed by a year-by-year table: year, age, starting balance,
+monthly payout (nominal and in today's dollars), that year's equity return and
+inflation, and ending balance. Three summary lines report the ending balance in
+nominal dollars, the ending balance in today's dollars, and the cumulative
+inflation factor over the projection.
+.SH ASSUMPTIONS AND CAVEATS
+.IP \(bu 2
+This models withdrawing the annuity-\fIequivalent\fR amount while staying
+invested in equities. It is \fBnot\fR an annuity purchase: there is no mortality
+pooling and no income guarantee, and the balance can be depleted by a poor
+sequence of early returns.
+.IP \(bu 2
+The quote site supports ages 40\(en90 only; quote ages above 90 are clamped to
+the age-90 payout rate. This is conservative \(em it understates the rising
+payout rate at very old ages.
+.IP \(bu 2
+Annuity payouts are "Average Estimated Quotes" scraped live from
+immediateannuities.com, not binding rates from a single insurer. Network access
+is required.
+.IP \(bu 2
+A single invocation is one random path. Run with a fixed
+.B --seed
+for reproducibility; use the Monte Carlo driver for confidence intervals.
+.SH EXAMPLES
+.PP
+A reproducible single-life projection:
+.PP
+.RS
+.nf
+python withdrawal_projection.py 1000000 65 M FL --seed 1
+.fi
+.RE
+.PP
+A joint-life projection using the lognormal model:
+.PP
+.RS
+.nf
+python withdrawal_projection.py 1000000 65 M FL \\
+    --joint-age 63 --joint-gender F --model lognormal
+.fi
+.RE
+.PP
+A block bootstrap with 10-year blocks to emphasize inflation persistence:
+.PP
+.RS
+.nf
+python withdrawal_projection.py 1000000 70 F CA --model block --block-length 10
+.fi
+.RE
+.SH FILES
+.TP
+.B withdrawal_projection.py
+This program. Exposes \fBbuild_rate_cache()\fR and \fBsimulate_path()\fR for reuse
+by a Monte Carlo (many-paths) driver.
+.TP
+.B annuity_quote.py
+Fetches and parses the monthly life-annuity payout.
+.TP
+.B equity_model.py
+The joint equity-return / inflation models.
+.TP
+.B market_data.py
+Embedded historical S&P 500 returns and CPI inflation, 1928\(en2025.
+.SH ENVIRONMENT
+Run with the project virtualenv, which provides NumPy:
+.B ~/finance/planning/.venv/bin/python.
+Network access to immediateannuities.com is required.
+.SH SEE ALSO
+.BR annuity_quote (1)
+.SH AUTHOR
+Generated for the personal finance planning workspace.
