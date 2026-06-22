@@ -11,10 +11,11 @@ data (1928–2025).
 ## Disclaimer
 
 **These programs are for educational purposes only and must not be taken as
-financial advice.** How to allocate investments varies between individuals and is
-**not** contemplated in any of the analysis performed by the programs in this
-repository. The projected cashflows from the investment strategies modeled here
-are **speculative** and are likely to differ **significantly** from actual
+financial advice.** Appropriate investment advice varies between individuals and
+the analysis performed by the programs in this repository **do not** contemplate
+any such individual circumstances. Equity investment can lose money. The
+projected cashflows from the investment strategies modeled here are
+**speculative** and are likely to differ **significantly** from actual
 experience going forward.
 
 The scripts in this repository likely contain errors. There is **ABSOLUTELY NO
