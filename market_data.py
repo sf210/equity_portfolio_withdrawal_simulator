@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 """Historical annual market data, used to drive the equity-return / inflation model.
 
 Each entry is one calendar year paired together so the contemporaneous

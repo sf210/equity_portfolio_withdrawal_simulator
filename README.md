@@ -8,12 +8,25 @@ Live annuity quotes come from [immediateannuities.com](https://www.immediateannu
 equity-return and inflation scenarios are driven by historical S&P 500 and CPI
 data (1928–2025).
 
-> **Note:** This models withdrawing the annuity-*equivalent* amount while staying
-> invested — it is **not** an annuity purchase, so there is no mortality pooling
-> and no income guarantee. Because the annuity payout includes return of
-> principal, the withdrawal rate is high and the real balance typically erodes
-> over time. Quotes are "average estimated" figures, not binding offers. This is
-> a personal planning aid, not financial advice.
+## Disclaimer
+
+**These programs are for educational purposes only and must not be taken as
+financial advice.** How to allocate investments varies between individuals and is
+**not** contemplated in any of the analysis performed by the programs in this
+repository. The projected cashflows from the investment strategies modeled here
+are **speculative** and are likely to differ **significantly** from actual
+experience going forward.
+
+The scripts in this repository likely contain errors. There is **ABSOLUTELY NO
+WARRANTY** for the software in this repository; see the [License](#license) for
+the full warranty disclaimer and limitation of liability.
+
+Additional modeling caveats: this models withdrawing the annuity-*equivalent*
+amount while staying invested — it is **not** an annuity purchase, so there is no
+mortality pooling and no income guarantee. Because the annuity payout includes
+return of principal, the withdrawal rate is high and the real balance typically
+erodes over time. Annuity quotes are "average estimated" figures, not binding
+offers.
 
 ## Setup
 
@@ -156,3 +169,9 @@ man ./montecarlo.1
 
 (`annuity_quote.py`, `equity_model.py`, and `market_data.py` do not have man
 pages; see the docstrings and `--help`.)
+
+## License
+
+Licensed under the [Mozilla Public License 2.0](LICENSE). The software is provided
+"as is", without warranty of any kind — see Sections 6 ("Disclaimer of Warranty")
+and 7 ("Limitation of Liability") of the license.

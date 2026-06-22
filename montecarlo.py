@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 """Monte Carlo confidence intervals for the annuity-equivalent withdrawal model.
 
 Runs many random paths of withdrawal_projection.simulate_path (default 500) and

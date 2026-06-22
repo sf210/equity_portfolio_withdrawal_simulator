@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 """Look up an estimated monthly life-annuity payment from immediateannuities.com.
 
 Submits the homepage quote form (single POST to the "annuity-rates-step-1"
