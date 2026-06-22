@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 
+# Virtual environments (recreate from requirements.txt, don't commit)
+.venv/
+venv/
+env/
+
 # Local Claude Code config
 .claude/
 
