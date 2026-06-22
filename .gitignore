@@ -10,6 +10,10 @@ env/
 # Local Claude Code config
 .claude/
 
+# Generated Monte Carlo report exports (PDF/CSV output)
+montecarlo_report.csv
+montecarlo_report.pdf
+
 # SSH keys (do NOT commit private keys)
 equity_withdrawal
 equity_withdrawal.pub
