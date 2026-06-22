@@ -1,4 +1,4 @@
-.TH MONTECARLO 1 "2026-06-21" "finance/planning/annuity" "Annuity Planning Tools"
+.TH MONTECARLO 1 "2026-06-22" "finance/planning/annuity" "Annuity Planning Tools"
 .SH NAME
 montecarlo \- Monte Carlo confidence intervals for annuity-equivalent withdrawals
 .SH SYNOPSIS
@@ -103,7 +103,11 @@ equity/inflation correlation) and a line echoing the run parameters and elapsed
 time.
 .IP \(bu 2
 .B Ending balance \(em today's dollars:
-mean, median, and the four confidence intervals.
+mean, median, and the four confidence intervals, followed by the worst
+single-year and worst cumulative five-year
+.I real
+(inflation-adjusted) equity total return observed anywhere in the simulation,
+shown as percentages.
 .IP \(bu 2
 .B Ending balance \(em nominal dollars:
 the same statistics, undeflated.
@@ -115,6 +119,31 @@ the starting amount, and below half of it.
 a table with one row per projected year (year, age, mean, median, and the four
 confidence intervals) for the annual payout (monthly x 12), in today's dollars
 unless \fB--nominal\fR is given.
+.SH FILE EXPORT
+When standard input is a terminal, after printing the report the program prompts:
+.RS
+.PP
+.nf
+Save output to a file? [PDF / csv / exit]:
+.fi
+.RE
+.PP
+Type \fBPDF\fR to write a PDF, \fBcsv\fR to write a CSV, or \fBexit\fR (or just
+press Enter) to finish. Each choice asks for a filename and offers a default.
+After a file is written the prompt repeats, so several files can be saved in one
+run; it keeps asking until \fBexit\fR is entered. The prompt is skipped entirely
+when input is not a terminal (e.g. piped or redirected), so scripted runs are
+unaffected.
+.PP
+The \fBPDF\fR is a landscape report containing the full output: the username and
+local date/time at the top, the two ending-balance tables (today's and nominal
+dollars) side by side, and the annual-payout table below them. If the report
+spans more than one page, the username and date/time are repeated, with a page
+counter, in the footer of every page after the first.
+.PP
+The \fBCSV\fR contains the ending-balance summary (both bases, with the worst-
+return figures) and the full per-year payout table, as numeric rows suitable for
+a spreadsheet.
 .SH NOTES
 .IP \(bu 2
 This models withdrawing the annuity-\fIequivalent\fR amount while staying invested

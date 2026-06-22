@@ -142,6 +142,17 @@ traffic stays at ~one quote per age regardless of the number of simulations.
   `--nominal` (show the payout table in nominal instead of today's dollars).
 - A "C% confidence interval" is the central interval covering C% of outcomes
   (e.g. 80% = the 10th–90th percentile range).
+- The ending-balance (today's dollars) block also reports the **worst single-year**
+  and **worst cumulative five-year** *real* (inflation-adjusted) equity total
+  return seen anywhere in the simulation.
+- When run interactively it then offers to save the full report to a **PDF** or
+  **CSV** file (type `PDF`, `csv`, or `exit` at the prompt); after each save it
+  asks again, so you can write several files, and keeps prompting until you type
+  `exit`. The PDF — written with
+  a small built-in writer, no extra dependencies — is a landscape page headed with
+  your username and the local date/time, with the two ending-balance tables side by
+  side and the annual-payout table below; on multi-page reports the heading repeats
+  in the footer. The prompt is skipped when output is piped or redirected.
 
 ```bash
 # default 500-path run
