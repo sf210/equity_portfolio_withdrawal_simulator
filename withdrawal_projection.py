@@ -95,11 +95,13 @@ def build_rate_cache(gender: str, state: str, joint_gender: str | None = None,
 
 
 def simulate_path(amount, age, gender, state, equity_returns, inflation_rates,
-                  rate_cache, joint_age=None):
+                  rate_cache, joint_age=None, collect_rows=True):
     """Run one withdrawal path.
 
     equity_returns / inflation_rates are decimal-fraction arrays of length N
-    (one per year). Returns a dict with per-year detail and summary totals.
+    (one per year). Returns a dict with payout/balance arrays and summary totals;
+    set collect_rows=False to skip the per-year detail dicts when running many
+    Monte Carlo paths.
     """
     years = len(equity_returns)
     has_joint = joint_age is not None
@@ -122,20 +124,21 @@ def simulate_path(amount, age, gender, state, equity_returns, inflation_rates,
         balance = (balance - annual_withdrawal) * (1.0 + eq)
         cum_infl *= (1.0 + infl)
 
-        payouts_nominal[t] = monthly
-        payouts_real[t] = monthly / cum_infl
-        rows.append({
-            "year": t + 1,
-            "age": cur_age,
-            "balance_start": balance_start,
-            "monthly_payout": monthly,
-            "monthly_payout_real": monthly / cum_infl,
-            "annual_withdrawal": annual_withdrawal,
-            "equity_return": eq,
-            "inflation": infl,
-            "balance_end": balance,
-            "balance_end_real": balance / cum_infl,
-        })
+        # Payout is reported as the annual amount (monthly x 12).
+        payouts_nominal[t] = annual_withdrawal
+        payouts_real[t] = annual_withdrawal / cum_infl
+        if collect_rows:
+            rows.append({
+                "year": t + 1,
+                "age": cur_age,
+                "balance_start": balance_start,
+                "payout": annual_withdrawal,
+                "payout_real": annual_withdrawal / cum_infl,
+                "equity_return": eq,
+                "inflation": infl,
+                "balance_end": balance,
+                "balance_end_real": balance / cum_infl,
+            })
 
     return {
         "rows": rows,
@@ -151,13 +154,13 @@ def _print_report(result, model_summary):
     print(model_summary)
     print()
     hdr = (f"{'Yr':>2} {'Age':>3} {'Balance start':>15} "
-           f"{'Monthly':>10} {'Monthly(today$)':>15} "
+           f"{'Annual':>12} {'Annual(today$)':>15} "
            f"{'Equity':>7} {'CPI':>6} {'Balance end':>15}")
     print(hdr)
     print("-" * len(hdr))
     for r in result["rows"]:
         print(f"{r['year']:>2} {r['age']:>3} {r['balance_start']:>15,.0f} "
-              f"{r['monthly_payout']:>10,.0f} {r['monthly_payout_real']:>15,.0f} "
+              f"{r['payout']:>12,.0f} {r['payout_real']:>15,.0f} "
               f"{r['equity_return']:>+7.1%} {r['inflation']:>+6.1%} "
               f"{r['balance_end']:>15,.0f}")
     print()

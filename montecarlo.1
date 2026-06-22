@@ -1,0 +1,176 @@
+.TH MONTECARLO 1 "2026-06-21" "finance/planning/annuity" "Annuity Planning Tools"
+.SH NAME
+montecarlo \- Monte Carlo confidence intervals for annuity-equivalent withdrawals
+.SH SYNOPSIS
+.B python montecarlo.py
+.I amount age gender state
+.RB [ --joint-age
+.IR AGE ]
+.RB [ --joint-gender
+.IR M|F ]
+.RB [ --sims
+.IR N ]
+.RB [ --years
+.IR N ]
+.RB [ --model
+.IR bootstrap|block|lognormal ]
+.RB [ --block-length
+.IR YEARS ]
+.RB [ --nominal ]
+.RB [ --seed
+.IR INT ]
+.SH DESCRIPTION
+.B montecarlo.py
+runs many random paths of the annuity-equivalent withdrawal model implemented in
+.BR withdrawal_projection (1)
+and reports the distribution of outcomes. For both the ending balance and the
+yearly payout (the annual amount, i.e. the monthly payout times 12) it prints the
+mean, the median, and the 80%, 90%, 95%, and 99% confidence intervals.
+.PP
+Each path applies the same strategy: keep the money invested in equities and each
+year withdraw twelve times the life-annuity payout quoted for the current balance
+and age (see
+.BR withdrawal_projection (1)
+for the full description). Equity returns and CPI inflation are drawn jointly from
+the model selected by
+.BR --model .
+.PP
+The annuity-rate cache is built once and reused across every path, so total
+network traffic is roughly one quote per age regardless of the number of
+simulations. The simulation loop itself is inexpensive; the dominant cost is the
+one-time set of quotes fetched at startup.
+.SH CONFIDENCE INTERVALS
+A "C% confidence interval" is the central interval covering C% of the simulated
+outcomes \(em the
+.RI [ (100\-C)/2 ", " 100\-(100\-C)/2 ]
+percentile range:
+.IP \(bu 2
+80% interval = 10th to 90th percentile
+.IP \(bu 2
+90% interval = 5th to 95th percentile
+.IP \(bu 2
+95% interval = 2.5th to 97.5th percentile
+.IP \(bu 2
+99% interval = 0.5th to 99.5th percentile
+.SH OPTIONS
+.TP
+.I amount
+Starting amount invested (premium). Accepts plain digits, commas, or a leading
+"$" (e.g. \fB1000000\fR, \fB1,000,000\fR). Must be positive.
+.TP
+.I age
+Age today. Integer 40\(en90.
+.TP
+.I gender
+\fBM\fR or \fBF\fR (\fBmale\fR/\fBfemale\fR also accepted).
+.TP
+.I state
+Two-letter US state code, e.g. \fBFL\fR, or \fBOTHER\fR.
+.TP
+.BI --joint-age " AGE"
+Age of a joint (second) beneficiary, 40\(en90. Switches to a joint-life annuity.
+Must be given together with \fB--joint-gender\fR.
+.TP
+.BI --joint-gender " M|F"
+Gender of the joint beneficiary. Must be given together with \fB--joint-age\fR.
+.TP
+.BI --sims " N"
+Number of simulated paths. Default \fB500\fR. Must be at least 2.
+.TP
+.BI --years " N"
+Number of years to project per path. Default \fB30\fR.
+.TP
+.BI --model " bootstrap|block|lognormal"
+Equity/inflation return model (see \fBwithdrawal_projection\fR(1) for details).
+Default \fBbootstrap\fR.
+.TP
+.BI --block-length " YEARS"
+Block size in years, used only with \fB--model block\fR. Default \fB5\fR.
+.TP
+.B --nominal
+Show the per-year payout table in nominal dollars. By default the payout table is
+in today's (inflation-deflated) dollars. The ending-balance section always shows
+both nominal and today's dollars.
+.TP
+.BI --seed " INT"
+Seed for the random number generator, for reproducible runs. Default: random.
+.SH OUTPUT
+In order:
+.IP \(bu 2
+A calibration header for the chosen model (sample span; equity arithmetic and
+geometric mean and standard deviation; CPI mean and standard deviation;
+equity/inflation correlation) and a line echoing the run parameters and elapsed
+time.
+.IP \(bu 2
+.B Ending balance \(em today's dollars:
+mean, median, and the four confidence intervals.
+.IP \(bu 2
+.B Ending balance \(em nominal dollars:
+the same statistics, undeflated.
+.IP \(bu 2
+A downside line: the percentage of paths whose real ending balance finishes below
+the starting amount, and below half of it.
+.IP \(bu 2
+.B Annual payout by year:
+a table with one row per projected year (year, age, mean, median, and the four
+confidence intervals) for the annual payout (monthly x 12), in today's dollars
+unless \fB--nominal\fR is given.
+.SH NOTES
+.IP \(bu 2
+This models withdrawing the annuity-\fIequivalent\fR amount while staying invested
+in equities; it is \fBnot\fR an annuity purchase (no mortality pooling, no income
+guarantee). Because the full annuity payout includes return of principal, the
+withdrawal rate is high and the real balance typically erodes over time \(em often
+finishing below the starting amount. This is expected model behavior.
+.IP \(bu 2
+Quote ages above 90 are clamped to the age-90 payout rate (the quote site's
+maximum age).
+.IP \(bu 2
+Network access to immediateannuities.com is required for the startup quotes.
+.SH EXAMPLES
+.PP
+Default 500-path run:
+.PP
+.RS
+.nf
+python montecarlo.py 1000000 65 M FL
+.fi
+.RE
+.PP
+2000 paths with the block bootstrap and a fixed seed:
+.PP
+.RS
+.nf
+python montecarlo.py 1000000 65 M FL --sims 2000 --model block --seed 1
+.fi
+.RE
+.PP
+Joint-life run with the payout table in nominal dollars:
+.PP
+.RS
+.nf
+python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F --nominal
+.fi
+.RE
+.SH FILES
+.TP
+.B montecarlo.py
+This program.
+.TP
+.B withdrawal_projection.py
+Provides \fBbuild_rate_cache()\fR and \fBsimulate_path()\fR, reused for every path.
+.TP
+.B equity_model.py
+The joint equity-return / inflation models.
+.TP
+.B market_data.py
+Embedded historical S&P 500 returns and CPI inflation, 1928\(en2025.
+.SH ENVIRONMENT
+Run with the project virtualenv, which provides NumPy:
+.B ~/finance/planning/.venv/bin/python.
+Network access to immediateannuities.com is required.
+.SH SEE ALSO
+.BR withdrawal_projection (1),
+.BR annuity_quote (1)
+.SH AUTHOR
+Generated for the personal finance planning workspace.

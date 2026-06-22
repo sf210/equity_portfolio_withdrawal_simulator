@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local Claude Code config
+.claude/
+
+# SSH keys (do NOT commit private keys)
+equity_withdrawal
+equity_withdrawal.pub
+*.pem
+id_*
