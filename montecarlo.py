@@ -5,9 +5,10 @@
 
 """Monte Carlo confidence intervals for the annuity-equivalent withdrawal model.
 
-Runs many random paths of withdrawal_projection.simulate_path (default 500) and
+Runs many random paths of withdrawal_projection.simulate_path (default 5000) and
 reports, for both the ending balance and the yearly payout (annual = monthly x
-12), the mean, median, and the 80% / 90% / 95% / 99% confidence intervals.
+12), the mean, median, and the 80% / 90% / 95% / 99% confidence intervals. The
+payout table is reported in today's dollars (deflated by cumulative inflation).
 
 A "C% confidence interval" here is the central interval covering C% of the
 simulated outcomes, i.e. the [(100-C)/2, 100-(100-C)/2] percentile range:
@@ -27,7 +28,8 @@ a PDF or CSV file.
 Examples:
     python montecarlo.py 1000000 65 M FL
     python montecarlo.py 1000000 65 M FL --sims 2000 --model block --seed 1
-    python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F --nominal
+    python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F \
+        --upper-bound 1.2 --lower-bound 0.5
 """
 
 from __future__ import annotations
@@ -68,7 +70,8 @@ def summarize(values: np.ndarray) -> dict:
 
 
 def run(amount, age, gender, state, joint_age, joint_gender,
-        sims, years, model, block_length, seed):
+        sims, years, model, block_length, seed,
+        upper_bound=None, lower_bound=None):
     """Run `sims` paths.
 
     Returns (jrm, ending_nominal, ending_real, payouts_nominal, payouts_real,
@@ -96,6 +99,7 @@ def run(amount, age, gender, state, joint_age, joint_gender,
             amount=amount, age=age, gender=gender, state=state,
             equity_returns=equity, inflation_rates=inflation,
             rate_cache=rate_cache, joint_age=joint_age, collect_rows=False,
+            upper_bound=upper_bound, lower_bound=lower_bound,
         )
         ending_nominal[i] = res["ending_balance"]
         ending_real[i] = res["ending_balance_real"]
@@ -329,6 +333,86 @@ def _prompt_and_export(pdf_body, footer_text, csv_kwargs):
             print("Please type PDF, csv, or exit.")
 
 
+def build_report(amount, age, gender, state, joint_age, joint_gender,
+                 sims, years, model, block_length, seed,
+                 upper_bound=None, lower_bound=None):
+    """Run the simulation and assemble the report in every output form.
+
+    Returns (report_text, pdf_body, footer_text, csv_kwargs):
+      report_text -- the stacked-block text report (what main() prints),
+      pdf_body    -- list of lines for write_pdf (blocks side by side),
+      footer_text -- the "user    timestamp" header/footer line,
+      csv_kwargs  -- kwargs ready to splat into write_csv.
+    Raises annuity_quote.QuoteError / urllib.error.URLError on fetch failure.
+    """
+    t0 = time.time()
+    jrm, end_nom, end_real, pay_nom, pay_real, equities, inflations = run(
+        amount=amount, age=age, gender=gender, state=state,
+        joint_age=joint_age, joint_gender=joint_gender,
+        sims=sims, years=years, model=model,
+        block_length=block_length, seed=seed,
+        upper_bound=upper_bound, lower_bound=lower_bound,
+    )
+    elapsed = time.time() - t0
+
+    worst_1yr, worst_5yr = worst_real_returns(equities, inflations)
+
+    model_summary = jrm.summary()
+    bounds_bits = []
+    if upper_bound is not None:
+        bounds_bits.append(f"upper {upper_bound:g}x")
+    if lower_bound is not None:
+        bounds_bits.append(f"lower {lower_bound:g}x")
+    bounds_note = f", bounds {'/'.join(bounds_bits)}" if bounds_bits else ""
+    params_line = (
+        f"{sims:,} simulations x {years} years  "
+        f"(amount ${amount:,}, age {age} {gender}, {state}"
+        + (f", joint {joint_age} {joint_gender}" if joint_age else "")
+        + bounds_note
+        + f")   [{elapsed:.1f}s]")
+
+    real_block = _balance_block_lines(
+        "Ending balance - today's dollars", end_real,
+        extras=_worst_return_lines(worst_1yr, worst_5yr))
+    nom_block = _balance_block_lines("Ending balance - nominal dollars", end_nom)
+
+    pct_below_start = 100.0 * np.mean(end_real < amount)
+    pct_below_half = 100.0 * np.mean(end_real < amount * 0.5)
+    downside = (f"Paths ending below starting amount (real): {pct_below_start:.1f}%   "
+                f"below half of it: {pct_below_half:.1f}%")
+
+    payout_title = "Annual payout by year - today's dollars"
+    payout = pay_real
+    payout_lines = _payout_table_lines(payout_title, payout, age)
+
+    # ----- stacked text report -----
+    report_lines = (
+        [model_summary, "", params_line, ""]
+        + real_block + [""]
+        + nom_block + ["", downside, ""]
+        + payout_lines
+    )
+    report_text = "\n".join(report_lines)
+
+    # ----- export bodies -----
+    user = getpass.getuser()
+    stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    footer_text = f"{user}    {stamp}"
+    pdf_body = (
+        [footer_text, "", *model_summary.split("\n"), "", params_line, ""]
+        + _side_by_side(real_block, nom_block)
+        + ["", downside, ""]
+        + payout_lines
+    )
+    csv_kwargs = dict(
+        header_line=footer_text, params_line=params_line,
+        end_real=end_real, end_nom=end_nom,
+        worst_1yr=worst_1yr, worst_5yr=worst_5yr,
+        payout_title=payout_title, payout=payout, age=age,
+    )
+    return report_text, pdf_body, footer_text, csv_kwargs
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         description="Monte Carlo confidence intervals for the annuity-equivalent "
@@ -345,15 +429,19 @@ def main(argv=None) -> int:
                    help="optional joint beneficiary age (40-90)")
     p.add_argument("--joint-gender", type=annuity_quote._normalize_gender,
                    default=None, help="optional joint beneficiary gender (M/F)")
-    p.add_argument("--sims", type=int, default=500,
-                   help="number of simulated paths (default 500)")
+    p.add_argument("--sims", type=int, default=5000,
+                   help="number of simulated paths (default 5000)")
     p.add_argument("--years", type=int, default=30, help="years to project (default 30)")
     p.add_argument("--model", choices=("bootstrap", "block", "lognormal"),
                    default="bootstrap", help="equity/inflation model (default bootstrap)")
     p.add_argument("--block-length", type=int, default=5,
                    help="block size in years for --model block (default 5)")
-    p.add_argument("--nominal", action="store_true",
-                   help="show the payout table in nominal dollars (default: today's $)")
+    p.add_argument("--upper-bound", type=float, default=None,
+                   help="cap annual withdrawal at this factor of year-1's "
+                        "withdrawal, in today's dollars (e.g. 1.2)")
+    p.add_argument("--lower-bound", type=float, default=None,
+                   help="floor annual withdrawal at this factor of year-1's "
+                        "withdrawal, in today's dollars (e.g. 0.5)")
     p.add_argument("--seed", type=int, default=None, help="RNG seed for reproducibility")
     args = p.parse_args(argv)
 
@@ -361,80 +449,28 @@ def main(argv=None) -> int:
         p.error("--joint-age and --joint-gender must be given together")
     if args.sims < 2:
         p.error("--sims must be at least 2")
+    if args.upper_bound is not None and args.upper_bound <= 0:
+        p.error("--upper-bound must be positive")
+    if args.lower_bound is not None and args.lower_bound < 0:
+        p.error("--lower-bound must not be negative")
+    if (args.upper_bound is not None and args.lower_bound is not None
+            and args.lower_bound > args.upper_bound):
+        p.error("--lower-bound must not exceed --upper-bound")
 
-    t0 = time.time()
     try:
-        jrm, end_nom, end_real, pay_nom, pay_real, equities, inflations = run(
+        report_text, pdf_body, footer_text, csv_kwargs = build_report(
             amount=args.amount, age=args.age, gender=args.gender, state=args.state,
             joint_age=args.joint_age, joint_gender=args.joint_gender,
             sims=args.sims, years=args.years, model=args.model,
             block_length=args.block_length, seed=args.seed,
+            upper_bound=args.upper_bound, lower_bound=args.lower_bound,
         )
     except (annuity_quote.QuoteError, urllib.error.URLError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    elapsed = time.time() - t0
 
-    worst_1yr, worst_5yr = worst_real_returns(equities, inflations)
-
-    model_summary = jrm.summary()
-    params_line = (
-        f"{args.sims:,} simulations x {args.years} years  "
-        f"(amount ${args.amount:,}, age {args.age} {args.gender}, {args.state}"
-        + (f", joint {args.joint_age} {args.joint_gender}" if args.joint_age else "")
-        + f")   [{elapsed:.1f}s]")
-
-    real_block = _balance_block_lines(
-        "Ending balance - today's dollars", end_real,
-        extras=_worst_return_lines(worst_1yr, worst_5yr))
-    nom_block = _balance_block_lines("Ending balance - nominal dollars", end_nom)
-
-    pct_below_start = 100.0 * np.mean(end_real < args.amount)
-    pct_below_half = 100.0 * np.mean(end_real < args.amount * 0.5)
-    downside = (f"Paths ending below starting amount (real): {pct_below_start:.1f}%   "
-                f"below half of it: {pct_below_half:.1f}%")
-
-    if args.nominal:
-        payout_title = "Annual payout by year - nominal dollars"
-        payout = pay_nom
-    else:
-        payout_title = "Annual payout by year - today's dollars"
-        payout = pay_real
-    payout_lines = _payout_table_lines(payout_title, payout, args.age)
-
-    # ----- stdout report (balance blocks stacked) -----
-    print(model_summary)
-    print()
-    print(params_line)
-    print()
-    for ln in real_block:
-        print(ln)
-    print()
-    for ln in nom_block:
-        print(ln)
-    print()
-    print(downside)
-    print()
-    for ln in payout_lines:
-        print(ln)
-
-    # ----- offer file export -----
-    user = getpass.getuser()
-    stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    header_line = f"{user}    {stamp}"
-    pdf_body = (
-        [header_line, "", *model_summary.split("\n"), "", params_line, ""]
-        + _side_by_side(real_block, nom_block)
-        + ["", downside, ""]
-        + payout_lines
-    )
-    csv_kwargs = dict(
-        header_line=header_line, params_line=params_line,
-        end_real=end_real, end_nom=end_nom,
-        worst_1yr=worst_1yr, worst_5yr=worst_5yr,
-        payout_title=payout_title, payout=payout, age=args.age,
-    )
-    _prompt_and_export(pdf_body, header_line, csv_kwargs)
+    print(report_text)
+    _prompt_and_export(pdf_body, footer_text, csv_kwargs)
     return 0
 
 

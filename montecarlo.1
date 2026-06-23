@@ -1,4 +1,4 @@
-.TH MONTECARLO 1 "2026-06-22" "finance/planning/annuity" "Annuity Planning Tools"
+.TH MONTECARLO 1 "2026-06-23" "finance/planning/annuity" "Annuity Planning Tools"
 .SH NAME
 montecarlo \- Monte Carlo confidence intervals for annuity-equivalent withdrawals
 .SH SYNOPSIS
@@ -16,7 +16,10 @@ montecarlo \- Monte Carlo confidence intervals for annuity-equivalent withdrawal
 .IR bootstrap|block|lognormal ]
 .RB [ --block-length
 .IR YEARS ]
-.RB [ --nominal ]
+.RB [ --upper-bound
+.IR FACTOR ]
+.RB [ --lower-bound
+.IR FACTOR ]
 .RB [ --seed
 .IR INT ]
 .SH DESCRIPTION
@@ -34,6 +37,16 @@ and age (see
 for the full description). Equity returns and CPI inflation are drawn jointly from
 the model selected by
 .BR --model .
+The per-year payout table is reported in today's (inflation-deflated) dollars;
+the ending-balance section shows both nominal and today's dollars.
+.PP
+The optional
+.B --upper-bound
+and
+.B --lower-bound
+factors cap and floor each path's annual withdrawal in today's dollars, relative
+to that path's first-year withdrawal (see
+.BR withdrawal_projection (1)).
 .PP
 The annuity-rate cache is built once and reused across every path, so total
 network traffic is roughly one quote per age regardless of the number of
@@ -75,7 +88,7 @@ Must be given together with \fB--joint-gender\fR.
 Gender of the joint beneficiary. Must be given together with \fB--joint-age\fR.
 .TP
 .BI --sims " N"
-Number of simulated paths. Default \fB500\fR. Must be at least 2.
+Number of simulated paths. Default \fB5000\fR. Must be at least 2.
 .TP
 .BI --years " N"
 Number of years to project per path. Default \fB30\fR.
@@ -87,10 +100,14 @@ Default \fBbootstrap\fR.
 .BI --block-length " YEARS"
 Block size in years, used only with \fB--model block\fR. Default \fB5\fR.
 .TP
-.B --nominal
-Show the per-year payout table in nominal dollars. By default the payout table is
-in today's (inflation-deflated) dollars. The ending-balance section always shows
-both nominal and today's dollars.
+.BI --upper-bound " FACTOR"
+Cap each path's annual withdrawal, in today's dollars, at this factor of that
+path's first-year withdrawal (e.g. \fB1.2\fR). Must be positive. Default: no cap.
+.TP
+.BI --lower-bound " FACTOR"
+Floor each path's annual withdrawal, in today's dollars, at this factor of that
+path's first-year withdrawal (e.g. \fB0.5\fR). Must be non-negative and not
+exceed \fB--upper-bound\fR. Default: no floor.
 .TP
 .BI --seed " INT"
 Seed for the random number generator, for reproducible runs. Default: random.
@@ -117,8 +134,8 @@ the starting amount, and below half of it.
 .IP \(bu 2
 .B Annual payout by year:
 a table with one row per projected year (year, age, mean, median, and the four
-confidence intervals) for the annual payout (monthly x 12), in today's dollars
-unless \fB--nominal\fR is given.
+confidence intervals) for the annual payout (monthly x 12), in today's
+(inflation-deflated) dollars.
 .SH FILE EXPORT
 When standard input is a terminal, after printing the report the program prompts:
 .RS
@@ -158,7 +175,7 @@ maximum age).
 Network access to immediateannuities.com is required for the startup quotes.
 .SH EXAMPLES
 .PP
-Default 500-path run:
+Default 5000-path run:
 .PP
 .RS
 .nf
@@ -174,17 +191,25 @@ python montecarlo.py 1000000 65 M FL --sims 2000 --model block --seed 1
 .fi
 .RE
 .PP
-Joint-life run with the payout table in nominal dollars:
+Joint-life run capping real spending at 120% and flooring it at 50% of year 1:
 .PP
 .RS
 .nf
-python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F --nominal
+python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F \\
+    --upper-bound 1.2 --lower-bound 0.5
 .fi
 .RE
 .SH FILES
 .TP
 .B montecarlo.py
-This program.
+This program. Exposes \fBbuild_report()\fR, the shared run-and-format entry point
+used by both the command line and the Tk GUI.
+.TP
+.B montecarlo_gui.py
+A Tcl/Tk front-end for this program: a form of the same inputs (with drop-downs
+for the fixed-choice fields), a Submit button reachable by Tab and activated by
+Enter, and Export PDF / Export CSV / Exit buttons. Run with a Python that has
+tkinter, e.g. \fB~/finance/planning/.venv/bin/python montecarlo_gui.py\fR.
 .TP
 .B withdrawal_projection.py
 Provides \fBbuild_rate_cache()\fR and \fBsimulate_path()\fR, reused for every path.

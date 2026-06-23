@@ -1,4 +1,9 @@
-# Third-party dependencies. Everything else used by these scripts is in the
-# Python standard library. Developed/tested against Python 3.14 and the version
-# pinned below. To allow newer NumPy 2.x, relax this to: numpy>=2,<3
+# Third-party dependencies. Everything else used by these scripts (including the
+# tkinter GUI) is in the Python standard library. Developed/tested against Python
+# 3.14 and the versions pinned below. To allow newer NumPy 2.x, relax the pin to:
+# numpy>=2,<3
 numpy==2.4.4
+
+# Docs only: used to regenerate README.html from README.md (not needed to run the
+# simulation tools). Comment out this line if you don't rebuild the docs.
+markdown==3.10.2

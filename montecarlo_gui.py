@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+"""Tcl/Tk front-end for the annuity-equivalent Monte Carlo (montecarlo.py).
+
+The top portion collects the same inputs as the command line; inputs with a
+fixed set of choices (gender, state, joint gender, model) are drop-downs. Tab
+moves the focus through every input and the Submit button in order; pressing
+Enter while the Submit button has focus runs the simulation, so no mouse is
+needed. The simulation runs on a background thread to keep the window
+responsive while it warms the annuity-rate cache over the network.
+
+Below the report there are Export PDF, Export CSV, and Exit buttons; the export
+buttons reuse montecarlo.write_pdf / write_csv and act on the most recent run.
+
+Run with a Python that has tkinter (the project .venv does):
+    ~/finance/planning/.venv/bin/python montecarlo_gui.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import queue
+import threading
+import tkinter as tk
+from tkinter import filedialog, font, messagebox, ttk
+
+import annuity_quote
+import montecarlo as mc
+
+
+def _optional(text):
+    """Strip a field; return None when blank."""
+    text = text.strip()
+    return text or None
+
+
+class MonteCarloGUI:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        root.title("Annuity-equivalent Monte Carlo")
+
+        self._queue: queue.Queue = queue.Queue()
+        self._last_pdf_body = None
+        self._last_footer = None
+        self._last_csv_kwargs = None
+
+        mono = font.nametofont("TkFixedFont").copy()
+        mono.configure(size=9)
+        self._mono = mono
+
+        self._build_inputs()
+        self._build_output()
+        self._build_actions()
+
+        self.amount.focus_set()
+
+    # ----- layout -----------------------------------------------------------
+    def _build_inputs(self):
+        frm = ttk.LabelFrame(self.root, text="Inputs", padding=8)
+        frm.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+        for c in (1, 3):
+            frm.columnconfigure(c, weight=1)
+
+        def row(r, c, label):
+            ttk.Label(frm, text=label).grid(row=r, column=c, sticky="w",
+                                            padx=(0, 4), pady=2)
+
+        def entry(r, c, default=""):
+            e = ttk.Entry(frm, width=16)
+            e.insert(0, default)
+            e.grid(row=r, column=c + 1, sticky="ew", padx=(0, 12), pady=2)
+            return e
+
+        def combo(r, c, values, default):
+            cb = ttk.Combobox(frm, values=values, state="readonly", width=14)
+            cb.set(default)
+            cb.grid(row=r, column=c + 1, sticky="ew", padx=(0, 12), pady=2)
+            return cb
+
+        # Left column then right column, so Tab order reads top-to-bottom,
+        # left-to-right naturally (widgets are created in that order).
+        row(0, 0, "Amount"); self.amount = entry(0, 0, "1,000,000")
+        row(0, 2, "Sims"); self.sims = entry(0, 2, "5000")
+
+        row(1, 0, "Age"); self.age = entry(1, 0, "65")
+        row(1, 2, "Years"); self.years = entry(1, 2, "30")
+
+        row(2, 0, "Gender"); self.gender = combo(2, 0, ["M", "F"], "M")
+        row(2, 2, "Model")
+        self.model = combo(2, 2, ["bootstrap", "block", "lognormal"], "bootstrap")
+
+        row(3, 0, "State")
+        self.state = combo(3, 0, sorted(annuity_quote.STATES), "FL")
+        row(3, 2, "Block length"); self.block_length = entry(3, 2, "5")
+
+        row(4, 0, "Joint age"); self.joint_age = entry(4, 0, "")
+        row(4, 2, "Upper bound"); self.upper_bound = entry(4, 2, "")
+
+        row(5, 0, "Joint gender")
+        self.joint_gender = combo(5, 0, ["", "M", "F"], "")
+        row(5, 2, "Lower bound"); self.lower_bound = entry(5, 2, "")
+
+        row(6, 0, "Seed"); self.seed = entry(6, 0, "")
+
+        self.submit = ttk.Button(frm, text="Submit", command=self.on_submit)
+        self.submit.grid(row=6, column=3, sticky="e", padx=(0, 12), pady=(6, 2))
+        # Enter on the focused Submit button runs the simulation.
+        self.submit.bind("<Return>", lambda _e: self.on_submit())
+
+        self.status = ttk.Label(frm, text="Ready.")
+        self.status.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+    def _build_output(self):
+        frm = ttk.Frame(self.root, padding=(8, 0))
+        frm.grid(row=1, column=0, sticky="nsew", padx=8)
+        self.root.rowconfigure(1, weight=1)
+        self.root.columnconfigure(0, weight=1)
+        frm.rowconfigure(0, weight=1)
+        frm.columnconfigure(0, weight=1)
+
+        self.output = tk.Text(frm, wrap="none", font=self._mono,
+                              width=110, height=28)
+        self.output.grid(row=0, column=0, sticky="nsew")
+        ys = ttk.Scrollbar(frm, orient="vertical", command=self.output.yview)
+        ys.grid(row=0, column=1, sticky="ns")
+        xs = ttk.Scrollbar(frm, orient="horizontal", command=self.output.xview)
+        xs.grid(row=1, column=0, sticky="ew")
+        self.output.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+        self.output.configure(state="disabled")
+        # Keep the report read-only but Tab-traversable past it.
+        self.output.configure(takefocus=0)
+
+    def _build_actions(self):
+        frm = ttk.Frame(self.root, padding=8)
+        frm.grid(row=2, column=0, sticky="ew")
+        self.export_pdf = ttk.Button(frm, text="Export PDF",
+                                     command=self.on_export_pdf, state="disabled")
+        self.export_csv = ttk.Button(frm, text="Export CSV",
+                                     command=self.on_export_csv, state="disabled")
+        exit_btn = ttk.Button(frm, text="Exit", command=self.root.destroy)
+        self.export_pdf.pack(side="left")
+        self.export_csv.pack(side="left", padx=(8, 0))
+        exit_btn.pack(side="right")
+
+    # ----- helpers -----------------------------------------------------------
+    def _set_output(self, text):
+        self.output.configure(state="normal")
+        self.output.delete("1.0", "end")
+        self.output.insert("1.0", text)
+        self.output.configure(state="disabled")
+
+    def _collect_params(self):
+        """Validate the form and return a kwargs dict for montecarlo.build_report.
+
+        Raises argparse.ArgumentTypeError / ValueError with a user-facing message.
+        """
+        amount = annuity_quote._normalize_amount(self.amount.get())
+        age = annuity_quote._check_age(self.age.get())
+        gender = annuity_quote._normalize_gender(self.gender.get())
+        state = annuity_quote._normalize_state(self.state.get())
+
+        ja = _optional(self.joint_age.get())
+        jg = _optional(self.joint_gender.get())
+        joint_age = annuity_quote._check_age(ja) if ja is not None else None
+        joint_gender = annuity_quote._normalize_gender(jg) if jg is not None else None
+        if (joint_age is None) != (joint_gender is None):
+            raise ValueError("Joint age and joint gender must be given together.")
+
+        sims = int(self.sims.get())
+        if sims < 2:
+            raise ValueError("Sims must be at least 2.")
+        years = int(self.years.get())
+        if years < 1:
+            raise ValueError("Years must be at least 1.")
+        block_length = int(self.block_length.get())
+
+        def factor(widget):
+            v = _optional(widget.get())
+            return float(v) if v is not None else None
+
+        upper = factor(self.upper_bound)
+        lower = factor(self.lower_bound)
+        if upper is not None and upper <= 0:
+            raise ValueError("Upper bound must be positive.")
+        if lower is not None and lower < 0:
+            raise ValueError("Lower bound must not be negative.")
+        if upper is not None and lower is not None and lower > upper:
+            raise ValueError("Lower bound must not exceed upper bound.")
+
+        seed_text = _optional(self.seed.get())
+        seed = int(seed_text) if seed_text is not None else None
+
+        return dict(
+            amount=amount, age=age, gender=gender, state=state,
+            joint_age=joint_age, joint_gender=joint_gender,
+            sims=sims, years=years, model=self.model.get(),
+            block_length=block_length, seed=seed,
+            upper_bound=upper, lower_bound=lower,
+        )
+
+    # ----- actions -----------------------------------------------------------
+    def on_submit(self):
+        try:
+            params = self._collect_params()
+        except (argparse.ArgumentTypeError, ValueError) as exc:
+            messagebox.showerror("Invalid input", str(exc))
+            return
+
+        self.submit.configure(state="disabled")
+        self.export_pdf.configure(state="disabled")
+        self.export_csv.configure(state="disabled")
+        self.status.configure(text="Running... (fetching annuity rates)")
+        self._set_output("Running simulation, please wait...")
+
+        threading.Thread(target=self._worker, args=(params,), daemon=True).start()
+        self.root.after(100, self._poll)
+
+    def _worker(self, params):
+        try:
+            result = mc.build_report(**params)
+            self._queue.put(("ok", result))
+        except Exception as exc:  # surfaced to the user in _poll
+            self._queue.put(("err", exc))
+
+    def _poll(self):
+        try:
+            kind, payload = self._queue.get_nowait()
+        except queue.Empty:
+            self.root.after(100, self._poll)
+            return
+
+        self.submit.configure(state="normal")
+        if kind == "err":
+            self.status.configure(text="Error.")
+            self._set_output("")
+            messagebox.showerror("Simulation failed", str(payload))
+            return
+
+        report_text, pdf_body, footer_text, csv_kwargs = payload
+        self._last_pdf_body = pdf_body
+        self._last_footer = footer_text
+        self._last_csv_kwargs = csv_kwargs
+        self._set_output(report_text)
+        self.export_pdf.configure(state="normal")
+        self.export_csv.configure(state="normal")
+        self.status.configure(text="Done.")
+
+    def on_export_pdf(self):
+        if self._last_pdf_body is None:
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export PDF", defaultextension=".pdf",
+            initialfile="montecarlo_report.pdf",
+            filetypes=[("PDF", "*.pdf"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            mc.write_pdf(path, self._last_pdf_body, self._last_footer)
+        except OSError as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        self.status.configure(text=f"Wrote {path}")
+
+    def on_export_csv(self):
+        if self._last_csv_kwargs is None:
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export CSV", defaultextension=".csv",
+            initialfile="montecarlo_report.csv",
+            filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            mc.write_csv(path, **self._last_csv_kwargs)
+        except OSError as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        self.status.configure(text=f"Wrote {path}")
+
+
+def main():
+    root = tk.Tk()
+    MonteCarloGUI(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

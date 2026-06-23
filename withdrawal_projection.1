@@ -1,4 +1,4 @@
-.TH WITHDRAWAL_PROJECTION 1 "2026-06-21" "finance/planning/annuity" "Annuity Planning Tools"
+.TH WITHDRAWAL_PROJECTION 1 "2026-06-23" "finance/planning/annuity" "Annuity Planning Tools"
 .SH NAME
 withdrawal_projection \- project annuity-equivalent withdrawals from an equity-invested account
 .SH SYNOPSIS
@@ -14,6 +14,10 @@ withdrawal_projection \- project annuity-equivalent withdrawals from an equity-i
 .IR bootstrap|block|lognormal ]
 .RB [ --block-length
 .IR YEARS ]
+.RB [ --upper-bound
+.IR FACTOR ]
+.RB [ --lower-bound
+.IR FACTOR ]
 .RB [ --seed
 .IR INT ]
 .SH DESCRIPTION
@@ -46,7 +50,23 @@ Equity returns and CPI inflation are drawn
 from the model selected by
 .B --model
 so the historical equity/inflation correlation is preserved. Results are
-reported both in nominal dollars and in today's (inflation-deflated) dollars.
+reported in nominal dollars (use
+.BR montecarlo (1)
+for the today's-dollar, inflation-deflated view across many paths).
+.PP
+The optional
+.B --upper-bound
+and
+.B --lower-bound
+factors cap and floor the annual withdrawal in today's dollars, relative to the
+first year's withdrawal. For example, if year 1 withdraws the equivalent of
+$50,000 in today's dollars, then
+.B --upper-bound 1.2
+limits every later year to at most $60,000 (today's dollars) and
+.B --lower-bound 0.5
+keeps every later year at no less than $25,000 (today's dollars). The clamp is
+applied to the cash actually withdrawn, so it feeds back into the surviving
+balance.
 .SH OPTIONS
 .TP
 .I amount
@@ -77,6 +97,15 @@ Equity/inflation return model (see \fBMODELS\fR). Default \fBbootstrap\fR.
 .TP
 .BI --block-length " YEARS"
 Block size in years, used only with \fB--model block\fR. Default \fB5\fR.
+.TP
+.BI --upper-bound " FACTOR"
+Cap the annual withdrawal, in today's dollars, at this factor of the first
+year's withdrawal (e.g. \fB1.2\fR). Must be positive. Default: no cap.
+.TP
+.BI --lower-bound " FACTOR"
+Floor the annual withdrawal, in today's dollars, at this factor of the first
+year's withdrawal (e.g. \fB0.5\fR). Must be non-negative and not exceed
+\fB--upper-bound\fR. Default: no floor.
 .TP
 .BI --seed " INT"
 Seed for the random number generator, for reproducible paths. Default: random.
@@ -110,10 +139,9 @@ reproduces the historical correlation.
 A calibration header (model, sample span, equity arithmetic/geometric mean and
 standard deviation, CPI mean and standard deviation, equity/inflation
 correlation), followed by a year-by-year table: year, age, starting balance,
-annual payout (monthly x 12; nominal and in today's dollars), that year's equity
-return and inflation, and ending balance. Three summary lines report the ending balance in
-nominal dollars, the ending balance in today's dollars, and the cumulative
-inflation factor over the projection.
+annual payout (monthly x 12), that year's equity return and inflation, and
+ending balance. All dollar figures are nominal. Two summary lines report the
+nominal ending balance and the cumulative inflation factor over the projection.
 .SH ASSUMPTIONS AND CAVEATS
 .IP \(bu 2
 This models withdrawing the annuity-\fIequivalent\fR amount while staying
@@ -158,6 +186,15 @@ A block bootstrap with 10-year blocks to emphasize inflation persistence:
 python withdrawal_projection.py 1000000 70 F CA --model block --block-length 10
 .fi
 .RE
+.PP
+A projection that caps real spending at 120% and floors it at 50% of year 1:
+.PP
+.RS
+.nf
+python withdrawal_projection.py 1000000 65 M FL \\
+    --upper-bound 1.2 --lower-bound 0.5
+.fi
+.RE
 .SH FILES
 .TP
 .B withdrawal_projection.py
@@ -177,6 +214,7 @@ Run with the project virtualenv, which provides NumPy:
 .B ~/finance/planning/.venv/bin/python.
 Network access to immediateannuities.com is required.
 .SH SEE ALSO
+.BR montecarlo (1),
 .BR annuity_quote (1)
 .SH AUTHOR
 Generated for the personal finance planning workspace.

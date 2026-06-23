@@ -32,7 +32,10 @@ offers.
 ## Setup
 
 Requires **Python 3.14** and network access (for live annuity quotes). The only
-third-party dependency is NumPy.
+third-party dependency needed to run the simulations is **NumPy**; the
+**markdown** package is an optional docs-only dependency, used solely to
+regenerate `README.html` from `README.md`. The Tk GUI uses `tkinter` from the
+standard library.
 
 ```bash
 git clone git@github.com:sf210/equity_portfolio_withdrawal_simulator.git
@@ -53,8 +56,8 @@ Data flows one direction, from a live quote + historical data into a projection:
 
 ```
 immediateannuities.com ──> annuity_quote.py ─┐
-                                             ├─> withdrawal_projection.py ──> montecarlo.py
-market_data.py ──> equity_model.py ──────────┘     (one random path)         (many paths + CIs)
+                                             ├─> withdrawal_projection.py ──> montecarlo.py ──> montecarlo_gui.py
+market_data.py ──> equity_model.py ──────────┘     (one random path)         (many paths + CIs)   (Tk front-end)
 ```
 
 ## The scripts
@@ -112,10 +115,13 @@ grows the remainder by that year's equity return, then ages everyone by one year
 Quote ages above 90 are clamped to the age-90 rate (the quote site's maximum).
 
 - **Inputs:** `amount age gender state` plus `--joint-age`/`--joint-gender`,
-  `--years` (default 30), `--model`, `--block-length`, `--seed`.
+  `--years` (default 30), `--model`, `--block-length`,
+  `--upper-bound`/`--lower-bound` (see [Withdrawal bounds](#withdrawal-bounds)),
+  and `--seed`.
 - **Output:** a calibration header, a year-by-year table (balance, **annual**
-  payout in nominal and today's dollars, that year's equity return and
-  inflation), and the ending balance in nominal and today's dollars.
+  payout, that year's equity return and inflation, ending balance), and the
+  ending balance. **All dollar figures are nominal** — use `montecarlo.py` for
+  the today's-dollar (inflation-adjusted) view.
 
 ```bash
 # reproducible single path
@@ -127,19 +133,34 @@ python withdrawal_projection.py 1000000 65 M FL \
 
 # block bootstrap with 10-year blocks
 python withdrawal_projection.py 1000000 70 F CA --model block --block-length 10
+
+# cap real spending at 120% and floor it at 50% of year 1
+python withdrawal_projection.py 1000000 65 M FL --upper-bound 1.2 --lower-bound 0.5
 ```
 
 Reusable functions for callers: `build_rate_cache(...)` and `simulate_path(...)`.
 
-### `montecarlo.py`
-Runs **many** paths (default 500) and reports the distribution of outcomes: the
-mean, median, and 80% / 90% / 95% / 99% confidence intervals for both the ending
-balance (nominal and today's dollars) and the **annual** payout by year. It builds
-the annuity-rate cache once and reuses it across every path, so total network
-traffic stays at ~one quote per age regardless of the number of simulations.
+#### Withdrawal bounds
 
-- **Inputs:** same as `withdrawal_projection.py`, plus `--sims` (default 500) and
-  `--nominal` (show the payout table in nominal instead of today's dollars).
+`withdrawal_projection.py` and `montecarlo.py` both accept optional
+`--upper-bound` and `--lower-bound` **factors** that cap and floor the annual
+withdrawal **in today's dollars**, relative to the **first year's** withdrawal.
+For example, if year 1 withdraws the equivalent of $50,000 in today's dollars,
+then `--upper-bound 1.2` limits every later year to at most $60,000 and
+`--lower-bound 0.5` keeps every later year at no less than $25,000 (both in
+today's dollars). The clamp is applied to the cash actually withdrawn, so it
+feeds back into the surviving balance. By default there is no cap or floor.
+
+### `montecarlo.py`
+Runs **many** paths (default 5000) and reports the distribution of outcomes: the
+mean, median, and 80% / 90% / 95% / 99% confidence intervals for both the ending
+balance (nominal and today's dollars) and the **annual** payout by year (in
+today's dollars). It builds the annuity-rate cache once and reuses it across
+every path, so total network traffic stays at ~one quote per age regardless of
+the number of simulations.
+
+- **Inputs:** same as `withdrawal_projection.py` (including
+  `--upper-bound`/`--lower-bound`), plus `--sims` (default 5000).
 - A "C% confidence interval" is the central interval covering C% of outcomes
   (e.g. 80% = the 10th–90th percentile range).
 - The ending-balance (today's dollars) block also reports the **worst single-year**
@@ -155,14 +176,44 @@ traffic stays at ~one quote per age regardless of the number of simulations.
   in the footer. The prompt is skipped when output is piped or redirected.
 
 ```bash
-# default 500-path run
+# default 5000-path run
 python montecarlo.py 1000000 65 M FL
 
 # 2000 paths, block bootstrap, fixed seed
 python montecarlo.py 1000000 65 M FL --sims 2000 --model block --seed 1
 
-# joint life, payout table in nominal dollars
-python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F --nominal
+# joint life, capping/flooring real spending relative to year 1
+python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F \
+    --upper-bound 1.2 --lower-bound 0.5
+```
+
+### `montecarlo_gui.py`
+A Tcl/Tk (tkinter) desktop front-end for `montecarlo.py`, for running the
+simulation without the command line.
+
+![The Monte Carlo GUI](mc_gui.png)
+
+The top **Inputs** panel collects exactly the same parameters as the command
+line. Fields with a fixed set of choices — **Gender**, **State**, **Model**, and
+**Joint gender** — are drop-downs; the rest are text entries, and blank optional
+fields (joint age/gender, upper/lower bound, seed) are simply omitted. The whole
+form is keyboard-navigable: **Tab** moves the focus through every input and on to
+the **Submit** button, and pressing **Enter** while Submit has focus runs the
+simulation — no mouse required.
+
+The run happens on a background thread (the status line shows its progress) so
+the window stays responsive while the annuity-rate cache is fetched. When it
+finishes, the full report appears in the scrollable monospaced panel and the
+bottom buttons activate:
+
+- **Export PDF** / **Export CSV** — save the most recent report via a file
+  dialog, using the same writers as the command-line tool.
+- **Exit** — close the window.
+
+Run it with a Python build that includes tkinter (the project `.venv` does):
+
+```bash
+python montecarlo_gui.py
 ```
 
 ## Man pages
@@ -179,8 +230,8 @@ man ./withdrawal_projection.1
 man ./montecarlo.1
 ```
 
-(`annuity_quote.py`, `equity_model.py`, and `market_data.py` do not have man
-pages; see the docstrings and `--help`.)
+(`annuity_quote.py`, `equity_model.py`, `market_data.py`, and `montecarlo_gui.py`
+do not have man pages; see the docstrings and `--help`.)
 
 ## License
 
