@@ -19,15 +19,19 @@ The ending-balance (today's dollars) block also reports the worst single-year an
 worst cumulative 5-year *real* (inflation-adjusted) equity total return seen
 anywhere in the simulation.
 
-The annuity-rate cache is built once and reused across every path, so total
-network traffic stays at ~one quote per age regardless of the number of sims.
+Annuity payouts are priced by default from the local SOA-table model
+(annuity_pricing, offline); --quotes site uses live immediateannuities.com
+quotes instead. Either way the rate cache is built once and reused across every
+path, so pricing cost (and any network traffic) stays at ~one rate per age
+regardless of the number of sims.
 
 When run interactively, after printing the report it offers to save the output to
 a PDF or CSV file.
 
 Examples:
     python montecarlo.py 1000000 65 M FL
-    python montecarlo.py 1000000 65 M FL --sims 2000 --model block --seed 1
+    python montecarlo.py 1000000 65 M FL --interest 0.04 --improvement
+    python montecarlo.py 1000000 65 M FL --quotes site --sims 2000 --seed 1
     python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F \
         --upper-bound 1.2 --lower-bound 0.5
 """
@@ -44,6 +48,7 @@ from datetime import datetime
 
 import numpy as np
 
+import annuity_pricing
 import annuity_quote
 import withdrawal_projection as wp
 from equity_model import JointReturnModel
@@ -71,19 +76,28 @@ def summarize(values: np.ndarray) -> dict:
 
 def run(amount, age, gender, state, joint_age, joint_gender,
         sims, years, model, block_length, seed,
-        upper_bound=None, lower_bound=None):
+        inflation=wp.DEFAULT_INFLATION, upper_bound=None, lower_bound=None,
+        quotes=wp.DEFAULT_QUOTES, interest=annuity_pricing.DEFAULT_INTEREST,
+        improvement=False, quote_year=None):
     """Run `sims` paths.
+
+    inflation is a constant annual decimal fraction applied to every year of
+    every path (used to deflate results to today's dollars). quotes / interest /
+    improvement / quote_year select and parameterise the annuity pricing source
+    (see withdrawal_projection.build_rate_cache).
 
     Returns (jrm, ending_nominal, ending_real, payouts_nominal, payouts_real,
     equities, inflations). The payout and per-year return arrays have shape
-    (sims, years).
+    (sims, years); inflations is filled with the constant inflation rate.
     """
     rng = np.random.default_rng(seed)
     jrm = JointReturnModel(model, block_length=block_length)
 
-    # Warm the rate cache up front: one network quote per distinct age.
+    # Warm the rate cache up front: one priced/quoted rate per distinct age.
     rate_cache = wp.build_rate_cache(
-        gender, state, joint_gender, prefetch_from_age=age, years=years
+        gender, state, joint_gender, prefetch_from_age=age, years=years,
+        source=quotes, interest_rate=interest, improvement=improvement,
+        quote_year=quote_year,
     )
 
     ending_nominal = np.empty(sims)
@@ -91,13 +105,14 @@ def run(amount, age, gender, state, joint_age, joint_gender,
     payouts_real = np.empty((sims, years))
     payouts_nominal = np.empty((sims, years))
     equities = np.empty((sims, years))
-    inflations = np.empty((sims, years))
+    inflations = np.full((sims, years), inflation)
 
     for i in range(sims):
-        equity, inflation = jrm.sample_path(years, rng)
+        equity, hist_inflation = jrm.sample_path(years, rng)
+        equity = wp.restate_equity_at_inflation(equity, hist_inflation, inflation)
         res = wp.simulate_path(
             amount=amount, age=age, gender=gender, state=state,
-            equity_returns=equity, inflation_rates=inflation,
+            equity_returns=equity, inflation=inflation,
             rate_cache=rate_cache, joint_age=joint_age, collect_rows=False,
             upper_bound=upper_bound, lower_bound=lower_bound,
         )
@@ -106,7 +121,6 @@ def run(amount, age, gender, state, joint_age, joint_gender,
         payouts_real[i] = res["payouts_real"]
         payouts_nominal[i] = res["payouts_nominal"]
         equities[i] = equity
-        inflations[i] = inflation
 
     return (jrm, ending_nominal, ending_real, payouts_nominal, payouts_real,
             equities, inflations)
@@ -335,7 +349,9 @@ def _prompt_and_export(pdf_body, footer_text, csv_kwargs):
 
 def build_report(amount, age, gender, state, joint_age, joint_gender,
                  sims, years, model, block_length, seed,
-                 upper_bound=None, lower_bound=None):
+                 inflation=wp.DEFAULT_INFLATION, upper_bound=None, lower_bound=None,
+                 quotes=wp.DEFAULT_QUOTES, interest=annuity_pricing.DEFAULT_INTEREST,
+                 improvement=False, quote_year=None):
     """Run the simulation and assemble the report in every output form.
 
     Returns (report_text, pdf_body, footer_text, csv_kwargs):
@@ -343,7 +359,8 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
       pdf_body    -- list of lines for write_pdf (blocks side by side),
       footer_text -- the "user    timestamp" header/footer line,
       csv_kwargs  -- kwargs ready to splat into write_csv.
-    Raises annuity_quote.QuoteError / urllib.error.URLError on fetch failure.
+    Raises annuity_quote.QuoteError / urllib.error.URLError (site quotes) or
+    FileNotFoundError (--improvement without the G2 tables) on pricing failure.
     """
     t0 = time.time()
     jrm, end_nom, end_real, pay_nom, pay_real, equities, inflations = run(
@@ -351,7 +368,9 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
         joint_age=joint_age, joint_gender=joint_gender,
         sims=sims, years=years, model=model,
         block_length=block_length, seed=seed,
-        upper_bound=upper_bound, lower_bound=lower_bound,
+        inflation=inflation, upper_bound=upper_bound, lower_bound=lower_bound,
+        quotes=quotes, interest=interest, improvement=improvement,
+        quote_year=quote_year,
     )
     elapsed = time.time() - t0
 
@@ -364,10 +383,17 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     if lower_bound is not None:
         bounds_bits.append(f"lower {lower_bound:g}x")
     bounds_note = f", bounds {'/'.join(bounds_bits)}" if bounds_bits else ""
+    if quotes == "site":
+        pricing_note = f", site quotes ({state})"
+    else:
+        pricing_note = (f", local @ {interest:.1%}"
+                        + (" +G2" if improvement else ""))
     params_line = (
         f"{sims:,} simulations x {years} years  "
-        f"(amount ${amount:,}, age {age} {gender}, {state}"
+        f"(amount ${amount:,}, age {age} {gender}"
         + (f", joint {joint_age} {joint_gender}" if joint_age else "")
+        + f", inflation {inflation:.1%}"
+        + pricing_note
         + bounds_note
         + f")   [{elapsed:.1f}s]")
 
@@ -424,7 +450,7 @@ def main(argv=None) -> int:
     p.add_argument("gender", type=annuity_quote._normalize_gender,
                    help="M/F (or male/female)")
     p.add_argument("state", type=annuity_quote._normalize_state,
-                   help="2-letter US state code, e.g. FL")
+                   help="2-letter US state code, e.g. FL (only used with --quotes site)")
     p.add_argument("--joint-age", type=annuity_quote._check_age, default=None,
                    help="optional joint beneficiary age (40-90)")
     p.add_argument("--joint-gender", type=annuity_quote._normalize_gender,
@@ -432,10 +458,23 @@ def main(argv=None) -> int:
     p.add_argument("--sims", type=int, default=5000,
                    help="number of simulated paths (default 5000)")
     p.add_argument("--years", type=int, default=30, help="years to project (default 30)")
+    p.add_argument("--inflation", type=float, default=wp.DEFAULT_INFLATION,
+                   help="constant annual inflation rate as a decimal fraction, "
+                        f"e.g. 0.025 for 2.5 percent (default {wp.DEFAULT_INFLATION})")
     p.add_argument("--model", choices=("bootstrap", "block", "lognormal"),
-                   default="bootstrap", help="equity/inflation model (default bootstrap)")
+                   default="bootstrap", help="equity model (default bootstrap)")
     p.add_argument("--block-length", type=int, default=5,
                    help="block size in years for --model block (default 5)")
+    p.add_argument("--quotes", choices=("local", "site"), default=wp.DEFAULT_QUOTES,
+                   help="annuity pricing source: local SOA-table model (offline, "
+                        f"default) or live immediateannuities.com (default {wp.DEFAULT_QUOTES})")
+    p.add_argument("--interest", type=float, default=annuity_pricing.DEFAULT_INTEREST,
+                   help="flat interest rate for --quotes local "
+                        f"(default {annuity_pricing.DEFAULT_INTEREST})")
+    p.add_argument("--improvement", action="store_true",
+                   help="apply Scale G2 mortality improvement (--quotes local only)")
+    p.add_argument("--quote-year", type=int, default=None,
+                   help="year to project mortality to for --improvement (default: current)")
     p.add_argument("--upper-bound", type=float, default=None,
                    help="cap annual withdrawal at this factor of year-1's "
                         "withdrawal, in today's dollars (e.g. 1.2)")
@@ -449,6 +488,8 @@ def main(argv=None) -> int:
         p.error("--joint-age and --joint-gender must be given together")
     if args.sims < 2:
         p.error("--sims must be at least 2")
+    if args.inflation <= -1:
+        p.error("--inflation must be greater than -1 (i.e. > -100%)")
     if args.upper_bound is not None and args.upper_bound <= 0:
         p.error("--upper-bound must be positive")
     if args.lower_bound is not None and args.lower_bound < 0:
@@ -463,9 +504,13 @@ def main(argv=None) -> int:
             joint_age=args.joint_age, joint_gender=args.joint_gender,
             sims=args.sims, years=args.years, model=args.model,
             block_length=args.block_length, seed=args.seed,
+            inflation=args.inflation,
             upper_bound=args.upper_bound, lower_bound=args.lower_bound,
+            quotes=args.quotes, interest=args.interest,
+            improvement=args.improvement, quote_year=args.quote_year,
         )
-    except (annuity_quote.QuoteError, urllib.error.URLError) as exc:
+    except (annuity_quote.QuoteError, urllib.error.URLError,
+            FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

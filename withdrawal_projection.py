@@ -9,33 +9,42 @@ Strategy modelled (this is NOT buying an annuity -- it keeps the money invested
 in equities and withdraws what a life annuity *would* pay):
 
   Starting balance = amount invested. For each of N years:
-    1. Look up the monthly life-annuity payout for the CURRENT balance at the
-       CURRENT age (immediateannuities.com, via annuity_quote.get_life_quote).
-       The payout is linear in premium, so we quote a $100k reference once per
-       age and scale it -- no per-balance HTTP calls.
+    1. Price the monthly life-annuity payout for the CURRENT balance at the
+       CURRENT age. By default this is the local SOA-table pricer
+       (annuity_pricing, offline); --quotes site instead fetches live
+       immediateannuities.com quotes. The payout is linear in premium, so one
+       rate per age is computed/quoted and scaled to the balance.
     2. Withdraw 12 x that monthly payout from the balance.
     3. Grow the remaining balance by that year's nominal equity return.
     4. Age (and any joint age) increases by 1; repeat.
 
-Equity returns and CPI inflation are drawn jointly (see equity_model) so the
-equity/inflation correlation is preserved. Results are reported in nominal
-dollars (the Monte Carlo follow-up reports in today's dollars).
+Equity returns are drawn from the equity_model as historical nominal returns,
+then restated onto the constant-inflation assumption (--inflation, default
+2.5%): each sampled year's embedded historical inflation is stripped out --
+preserving its real return -- and the constant rate is applied instead (see
+restate_equity_at_inflation). So inflation has one constant effect, on both the
+equity nominal return and the deflation of results to today's dollars; the
+historical inflation that was correlated with equity is ignored. Results are
+reported in nominal dollars (the Monte Carlo follow-up reports in today's
+dollars).
 
 Optional --upper-bound / --lower-bound put a cap and floor on the annual
 withdrawal, expressed in today's dollars as a factor of year 1's withdrawal:
 e.g. with a $50,000 year-1 withdrawal, --upper-bound 1.2 caps any later year at
 $60,000 (today's $) and --lower-bound 0.5 floors it at $25,000 (today's $).
 
-The annuity site only quotes ages 40-90, so quote ages above 90 are clamped to
-90 (conservative: it understates the rising payout rate at very old ages).
+The local pricer handles any age; with --quotes site the site only quotes ages
+40-90, so quote ages above 90 are clamped to 90 (conservative: it understates
+the rising payout rate at very old ages).
 
 This module exposes build_rate_cache() and simulate_path() for reuse by the
 Monte Carlo (many-paths / confidence-interval) follow-up.
 
 Example:
     python withdrawal_projection.py 1000000 65 M FL
-    python withdrawal_projection.py 1000000 65 M FL --joint-age 63 --joint-gender F \
-        --model lognormal --seed 1
+    python withdrawal_projection.py 1000000 65 M FL --interest 0.04 --improvement
+    python withdrawal_projection.py 1000000 65 M FL --quotes site \
+        --joint-age 63 --joint-gender F --model lognormal --seed 1
 """
 
 from __future__ import annotations
@@ -47,11 +56,14 @@ import urllib.error
 
 import numpy as np
 
+import annuity_pricing
 import annuity_quote
 from equity_model import JointReturnModel
 
 REF_PREMIUM = 100_000  # payout is linear in premium; quote this and scale.
 SITE_MAX_AGE = 90      # immediateannuities.com dropdown maximum.
+DEFAULT_INFLATION = 0.025  # constant annual CPI assumption (2.5%).
+DEFAULT_QUOTES = "local"   # pricing source: local SOA-table model vs. the site.
 
 
 class AnnuityRateCache:
@@ -86,13 +98,60 @@ class AnnuityRateCache:
         return self._cache[key]
 
 
-def build_rate_cache(gender: str, state: str, joint_gender: str | None = None,
-                     prefetch_from_age: int | None = None, years: int = 30):
-    """Create an AnnuityRateCache, optionally pre-fetching every age it will need.
+class LocalRateCache:
+    """Monthly payout *per dollar of premium*, by age, from annuity_pricing.
 
-    Pre-fetching warms the cache with one network call per distinct age up front
-    (handy before launching many Monte Carlo paths)."""
-    cache = AnnuityRateCache(gender, state, joint_gender)
+    A drop-in replacement for AnnuityRateCache that prices each rate locally from
+    the SOA mortality tables (no network) at a fixed interest rate, optionally
+    with Scale G2 mortality improvement. The local pricer handles any age, so --
+    unlike the site cache -- ages above 90 are NOT clamped.
+    """
+
+    def __init__(self, gender: str, joint_gender: str | None = None,
+                 interest_rate: float = annuity_pricing.DEFAULT_INTEREST,
+                 improvement: bool = False, quote_year: int | None = None):
+        self.gender = gender
+        self.joint_gender = joint_gender
+        self.interest_rate = interest_rate
+        self.improvement = improvement
+        self.quote_year = quote_year
+        self._cache: dict[tuple[int, int | None], float] = {}
+
+    def monthly_rate(self, age: int, joint_age: int | None = None) -> float:
+        key = (age, joint_age)
+        if key not in self._cache:
+            if joint_age is None:
+                annual = annuity_pricing.single_life_annuity(
+                    1.0, age, self.gender, self.interest_rate,
+                    self.improvement, self.quote_year)
+            else:
+                annual = annuity_pricing.last_survivor_annuity(
+                    1.0, age, self.gender, joint_age, self.joint_gender,
+                    self.interest_rate, self.improvement, self.quote_year)
+            self._cache[key] = annual / 12.0
+        return self._cache[key]
+
+
+def build_rate_cache(gender: str, state: str, joint_gender: str | None = None,
+                     prefetch_from_age: int | None = None, years: int = 30, *,
+                     source: str = DEFAULT_QUOTES,
+                     interest_rate: float = annuity_pricing.DEFAULT_INTEREST,
+                     improvement: bool = False, quote_year: int | None = None):
+    """Create a rate cache, optionally pre-warming every age it will need.
+
+    source="local" (default) prices from the SOA tables via annuity_pricing
+    (offline; honours interest_rate / improvement / quote_year and ignores
+    state). source="site" fetches live immediateannuities.com quotes (the
+    original behaviour; ignores interest_rate / improvement). Pre-fetching warms
+    the cache with one entry per distinct age up front -- essential for the site
+    source (one network call each) and harmless for the local one."""
+    if source == "site":
+        cache = AnnuityRateCache(gender, state, joint_gender)
+    elif source == "local":
+        cache = LocalRateCache(gender, joint_gender, interest_rate,
+                               improvement, quote_year)
+    else:
+        raise ValueError(f"unknown quotes source {source!r}; use 'local' or 'site'")
     if prefetch_from_age is not None:
         has_joint = joint_gender is not None
         for offset in range(years):
@@ -103,15 +162,38 @@ def build_rate_cache(gender: str, state: str, joint_gender: str | None = None,
     return cache
 
 
-def simulate_path(amount, age, gender, state, equity_returns, inflation_rates,
-                  rate_cache, joint_age=None, collect_rows=True,
-                  upper_bound=None, lower_bound=None):
+def restate_equity_at_inflation(equity_returns, hist_inflation, inflation):
+    """Restate historical nominal equity returns onto the constant-inflation basis.
+
+    Each sampled equity return is a *nominal* historical figure that embeds the
+    actual inflation of its source year. To make the simulation use a single
+    constant inflation rate, we strip that embedded inflation out -- preserving
+    the year's *real* equity return -- and re-apply the constant `inflation`:
+
+        real    = (1 + nominal) / (1 + hist_inflation) - 1
+        restated = (1 + real) * (1 + inflation) - 1
+
+    All arguments are decimal fractions; equity_returns / hist_inflation are
+    arrays of equal length, `inflation` is a scalar. Returns the restated
+    nominal equity returns. After this, deflating by the constant inflation
+    recovers exactly the historical real return, so inflation has no residual
+    effect on equity beyond the single constant assumption.
+    """
+    real = (1.0 + np.asarray(equity_returns, dtype=float)) / (1.0 + np.asarray(
+        hist_inflation, dtype=float)) - 1.0
+    return (1.0 + real) * (1.0 + inflation) - 1.0
+
+
+def simulate_path(amount, age, gender, state, equity_returns,
+                  rate_cache, inflation=DEFAULT_INFLATION, joint_age=None,
+                  collect_rows=True, upper_bound=None, lower_bound=None):
     """Run one withdrawal path.
 
-    equity_returns / inflation_rates are decimal-fraction arrays of length N
-    (one per year). Returns a dict with payout/balance arrays and summary totals;
-    set collect_rows=False to skip the per-year detail dicts when running many
-    Monte Carlo paths.
+    equity_returns is a decimal-fraction array of length N (one per year).
+    inflation is a single constant decimal fraction applied every year (used
+    only to express withdrawals/balances in today's dollars). Returns a dict
+    with payout/balance arrays and summary totals; set collect_rows=False to
+    skip the per-year detail dicts when running many Monte Carlo paths.
 
     upper_bound / lower_bound, if given, cap and floor the annual withdrawal in
     today's dollars at that factor of year 1's withdrawal (e.g. upper_bound=1.2
@@ -136,8 +218,7 @@ def simulate_path(amount, age, gender, state, equity_returns, inflation_rates,
         annual_withdrawal = 12.0 * monthly
 
         eq = float(equity_returns[t])
-        infl = float(inflation_rates[t])
-        cum_infl *= (1.0 + infl)
+        cum_infl *= (1.0 + inflation)
 
         # Optional cap/floor in today's dollars, anchored to year 1's withdrawal.
         real_withdrawal = annual_withdrawal / cum_infl
@@ -167,7 +248,7 @@ def simulate_path(amount, age, gender, state, equity_returns, inflation_rates,
                 "payout": annual_withdrawal,
                 "payout_real": real_withdrawal,
                 "equity_return": eq,
-                "inflation": infl,
+                "inflation": inflation,
                 "balance_end": balance,
                 "balance_end_real": balance / cum_infl,
             })
@@ -212,16 +293,29 @@ def main(argv=None) -> int:
     p.add_argument("gender", type=annuity_quote._normalize_gender,
                    help="M/F (or male/female)")
     p.add_argument("state", type=annuity_quote._normalize_state,
-                   help="2-letter US state code, e.g. FL")
+                   help="2-letter US state code, e.g. FL (only used with --quotes site)")
     p.add_argument("--joint-age", type=annuity_quote._check_age, default=None,
                    help="optional joint beneficiary age (40-90)")
     p.add_argument("--joint-gender", type=annuity_quote._normalize_gender,
                    default=None, help="optional joint beneficiary gender (M/F)")
     p.add_argument("--years", type=int, default=30, help="years to project (default 30)")
+    p.add_argument("--inflation", type=float, default=DEFAULT_INFLATION,
+                   help="constant annual inflation rate as a decimal fraction, "
+                        f"e.g. 0.025 for 2.5 percent (default {DEFAULT_INFLATION})")
     p.add_argument("--model", choices=("bootstrap", "block", "lognormal"),
-                   default="bootstrap", help="equity/inflation model (default bootstrap)")
+                   default="bootstrap", help="equity model (default bootstrap)")
     p.add_argument("--block-length", type=int, default=5,
                    help="block size in years for --model block (default 5)")
+    p.add_argument("--quotes", choices=("local", "site"), default=DEFAULT_QUOTES,
+                   help="annuity pricing source: local SOA-table model (offline, "
+                        f"default) or live immediateannuities.com (default {DEFAULT_QUOTES})")
+    p.add_argument("--interest", type=float, default=annuity_pricing.DEFAULT_INTEREST,
+                   help="flat interest rate for --quotes local "
+                        f"(default {annuity_pricing.DEFAULT_INTEREST})")
+    p.add_argument("--improvement", action="store_true",
+                   help="apply Scale G2 mortality improvement (--quotes local only)")
+    p.add_argument("--quote-year", type=int, default=None,
+                   help="year to project mortality to for --improvement (default: current)")
     p.add_argument("--upper-bound", type=float, default=None,
                    help="cap annual withdrawal at this factor of year-1's "
                         "withdrawal, in today's dollars (e.g. 1.2)")
@@ -240,20 +334,27 @@ def main(argv=None) -> int:
     if (args.upper_bound is not None and args.lower_bound is not None
             and args.lower_bound > args.upper_bound):
         p.error("--lower-bound must not exceed --upper-bound")
+    if args.inflation <= -1:
+        p.error("--inflation must be greater than -1 (i.e. > -100%)")
 
     model = JointReturnModel(args.model, block_length=args.block_length)
     rng = np.random.default_rng(args.seed)
-    equity, inflation = model.sample_path(args.years, rng)
+    equity, hist_inflation = model.sample_path(args.years, rng)
+    equity = restate_equity_at_inflation(equity, hist_inflation, args.inflation)
 
     try:
-        rate_cache = build_rate_cache(args.gender, args.state, args.joint_gender)
+        rate_cache = build_rate_cache(
+            args.gender, args.state, args.joint_gender,
+            source=args.quotes, interest_rate=args.interest,
+            improvement=args.improvement, quote_year=args.quote_year)
         result = simulate_path(
             amount=args.amount, age=args.age, gender=args.gender, state=args.state,
-            equity_returns=equity, inflation_rates=inflation,
+            equity_returns=equity, inflation=args.inflation,
             rate_cache=rate_cache, joint_age=args.joint_age,
             upper_bound=args.upper_bound, lower_bound=args.lower_bound,
         )
-    except (annuity_quote.QuoteError, urllib.error.URLError) as exc:
+    except (annuity_quote.QuoteError, urllib.error.URLError,
+            FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

@@ -6,11 +6,12 @@
 """Tcl/Tk front-end for the annuity-equivalent Monte Carlo (montecarlo.py).
 
 The top portion collects the same inputs as the command line; inputs with a
-fixed set of choices (gender, state, joint gender, model) are drop-downs. Tab
-moves the focus through every input and the Submit button in order; pressing
-Enter while the Submit button has focus runs the simulation, so no mouse is
-needed. The simulation runs on a background thread to keep the window
-responsive while it warms the annuity-rate cache over the network.
+fixed set of choices (gender, state, joint gender, model, quotes source) are
+drop-downs. Tab moves the focus through every input and the Submit button in
+order; pressing Enter while the Submit button has focus runs the simulation, so
+no mouse is needed. The simulation runs on a background thread to keep the
+window responsive while it builds the annuity-rate cache (local pricing by
+default; "site" warms it over the network).
 
 Below the report there are Export PDF, Export CSV, and Exit buttons; the export
 buttons reuse montecarlo.write_pdf / write_csv and act on the most recent run.
@@ -104,14 +105,26 @@ class MonteCarloGUI:
         row(5, 2, "Lower bound"); self.lower_bound = entry(5, 2, "")
 
         row(6, 0, "Seed"); self.seed = entry(6, 0, "")
+        row(6, 2, "Inflation")
+        self.inflation = entry(6, 2, str(mc.wp.DEFAULT_INFLATION))
+
+        row(7, 0, "Quotes")
+        self.quotes = combo(7, 0, ["local", "site"], mc.wp.DEFAULT_QUOTES)
+        row(7, 2, "Interest")
+        self.interest = entry(7, 2, str(mc.annuity_pricing.DEFAULT_INTEREST))
+
+        self.improvement = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text="Scale G2 mortality improvement (local only)",
+                        variable=self.improvement).grid(
+            row=8, column=0, columnspan=3, sticky="w", pady=2)
 
         self.submit = ttk.Button(frm, text="Submit", command=self.on_submit)
-        self.submit.grid(row=6, column=3, sticky="e", padx=(0, 12), pady=(6, 2))
+        self.submit.grid(row=8, column=3, sticky="e", padx=(0, 12), pady=(6, 2))
         # Enter on the focused Submit button runs the simulation.
         self.submit.bind("<Return>", lambda _e: self.on_submit())
 
         self.status = ttk.Label(frm, text="Ready.")
-        self.status.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self.status.grid(row=9, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
     def _build_output(self):
         frm = ttk.Frame(self.root, padding=(8, 0))
@@ -177,6 +190,16 @@ class MonteCarloGUI:
             raise ValueError("Years must be at least 1.")
         block_length = int(self.block_length.get())
 
+        inflation = float(self.inflation.get())
+        if inflation <= -1:
+            raise ValueError("Inflation must be greater than -1 (i.e. > -100%).")
+
+        quotes = self.quotes.get()
+        interest = float(self.interest.get())
+        if interest <= -1:
+            raise ValueError("Interest must be greater than -1 (i.e. > -100%).")
+        improvement = bool(self.improvement.get())
+
         def factor(widget):
             v = _optional(widget.get())
             return float(v) if v is not None else None
@@ -198,7 +221,8 @@ class MonteCarloGUI:
             joint_age=joint_age, joint_gender=joint_gender,
             sims=sims, years=years, model=self.model.get(),
             block_length=block_length, seed=seed,
-            upper_bound=upper, lower_bound=lower,
+            inflation=inflation, upper_bound=upper, lower_bound=lower,
+            quotes=quotes, interest=interest, improvement=improvement,
         )
 
     # ----- actions -----------------------------------------------------------

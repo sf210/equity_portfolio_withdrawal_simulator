@@ -10,10 +10,19 @@ withdrawal_projection \- project annuity-equivalent withdrawals from an equity-i
 .IR M|F ]
 .RB [ --years
 .IR N ]
+.RB [ --inflation
+.IR RATE ]
 .RB [ --model
 .IR bootstrap|block|lognormal ]
 .RB [ --block-length
 .IR YEARS ]
+.RB [ --quotes
+.IR local|site ]
+.RB [ --interest
+.IR RATE ]
+.RB [ --improvement ]
+.RB [ --quote-year
+.IR YEAR ]
 .RB [ --upper-bound
 .IR FACTOR ]
 .RB [ --lower-bound
@@ -33,11 +42,14 @@ Starting from
 .IR amount ,
 for each projected year the program:
 .IP 1. 4
-Looks up the monthly life-annuity payout for the current balance at the current
-age via
+Prices the monthly life-annuity payout for the current balance at the current
+age. By default this uses the local, offline SOA-table pricer
+.BR annuity_pricing (1);
+.B --quotes site
+instead fetches live quotes from
 .BR annuity_quote (1)
 (immediateannuities.com). Because the payout is linear in the premium, a single
-$100,000 reference quote is fetched per age and scaled to the balance.
+reference rate is computed per age and scaled to the balance.
 .IP 2. 4
 Withdraws twelve times that monthly payout from the balance.
 .IP 3. 4
@@ -45,12 +57,17 @@ Grows the remaining balance by that year's nominal equity return.
 .IP 4. 4
 Increments the age (and any joint age) by one and repeats.
 .PP
-Equity returns and CPI inflation are drawn
-.I jointly
-from the model selected by
+Inflation is a single constant rate
+.RB ( --inflation ,
+default 2.5%), used only to express results in today's dollars. Equity returns
+are drawn from the model selected by
 .B --model
-so the historical equity/inflation correlation is preserved. Results are
-reported in nominal dollars (use
+as historical nominal returns, then
+.I restated
+onto that constant-inflation basis: each sampled year's embedded historical
+inflation is stripped out (preserving its real return) and the constant rate is
+applied instead, so the historical inflation once correlated with equity has no
+residual effect. Results are reported in nominal dollars (use
 .BR montecarlo (1)
 for the today's-dollar, inflation-deflated view across many paths).
 .PP
@@ -74,13 +91,16 @@ Starting amount invested (premium). Accepts plain digits, commas, or a leading
 "$" (e.g. \fB1000000\fR, \fB1,000,000\fR, \fB$1,000,000\fR). Must be positive.
 .TP
 .I age
-Age today. Integer 40\(en90 (the quote site's supported range).
+Age today. Integer 40\(en90 (the quote site's supported entry range; the
+projection ages past 90 internally).
 .TP
 .I gender
 \fBM\fR or \fBF\fR (\fBmale\fR/\fBfemale\fR also accepted).
 .TP
 .I state
-Two-letter US state code, e.g. \fBFL\fR, or \fBOTHER\fR.
+Two-letter US state code, e.g. \fBFL\fR, or \fBOTHER\fR. Only used with
+\fB--quotes site\fR (the local pricer is state-independent), but always required
+on the command line.
 .TP
 .BI --joint-age " AGE"
 Age of a joint (second) beneficiary, 40\(en90. Switches the quote to a joint-life
@@ -92,11 +112,35 @@ Gender of the joint beneficiary. Must be given together with \fB--joint-age\fR.
 .BI --years " N"
 Number of years to project. Default \fB30\fR.
 .TP
+.BI --inflation " RATE"
+Constant annual inflation rate as a decimal fraction (e.g. \fB0.025\fR for
+2.5%). Used only to deflate results to today's dollars and to restate equity
+returns onto a constant-inflation basis. Default \fB0.025\fR.
+.TP
 .BI --model " bootstrap|block|lognormal"
-Equity/inflation return model (see \fBMODELS\fR). Default \fBbootstrap\fR.
+Equity return model (see \fBMODELS\fR). Default \fBbootstrap\fR.
 .TP
 .BI --block-length " YEARS"
 Block size in years, used only with \fB--model block\fR. Default \fB5\fR.
+.TP
+.BI --quotes " local|site"
+Annuity pricing source. \fBlocal\fR (default) prices from the SOA mortality
+tables via \fBannuity_pricing\fR(1) \(em fully offline, honouring \fB--interest\fR
+and \fB--improvement\fR. \fBsite\fR fetches live immediateannuities.com quotes
+(requires network; ignores \fB--interest\fR/\fB--improvement\fR).
+.TP
+.BI --interest " RATE"
+Flat annual interest rate for local pricing, as a decimal fraction. Used only
+with \fB--quotes local\fR. Default \fB0.035\fR.
+.TP
+.B --improvement
+Apply SOA Projection Scale G2 mortality improvement (generational projection to
+the quote year). Used only with \fB--quotes local\fR; requires the G2 tables
+\fBsoa_mortality_2583.csv\fR (male) and \fBsoa_mortality_2584.csv\fR (female).
+.TP
+.BI --quote-year " YEAR"
+Calendar year to project mortality to for \fB--improvement\fR. Default: the
+current year.
 .TP
 .BI --upper-bound " FACTOR"
 Cap the annual withdrawal, in today's dollars, at this factor of the first
@@ -149,20 +193,23 @@ invested in equities. It is \fBnot\fR an annuity purchase: there is no mortality
 pooling and no income guarantee, and the balance can be depleted by a poor
 sequence of early returns.
 .IP \(bu 2
-The quote site supports ages 40\(en90 only; quote ages above 90 are clamped to
-the age-90 payout rate. This is conservative \(em it understates the rising
-payout rate at very old ages.
+With \fB--quotes local\fR (the default) payouts are priced from the SOA 2012 IAM
+mortality tables at a flat \fB--interest\fR rate, with no insurer expense or
+profit load; the local pricer handles any age. At the default 3.5% it is
+conservative relative to current market quotes (which imply roughly 5%); see
+\fBannuity_pricing\fR(1).
 .IP \(bu 2
-Annuity payouts are "Average Estimated Quotes" scraped live from
-immediateannuities.com, not binding rates from a single insurer. Network access
-is required.
+With \fB--quotes site\fR, payouts are "Average Estimated Quotes" scraped live
+from immediateannuities.com, not binding rates from a single insurer; network
+access is required, and quote ages above 90 are clamped to the age-90 rate (the
+site's maximum), which understates the rising payout rate at very old ages.
 .IP \(bu 2
 A single invocation is one random path. Run with a fixed
 .B --seed
 for reproducibility; use the Monte Carlo driver for confidence intervals.
 .SH EXAMPLES
 .PP
-A reproducible single-life projection:
+A reproducible single-life projection (local pricing at the default 3.5%):
 .PP
 .RS
 .nf
@@ -170,11 +217,19 @@ python withdrawal_projection.py 1000000 65 M FL --seed 1
 .fi
 .RE
 .PP
-A joint-life projection using the lognormal model:
+Local pricing at 4% interest with Scale G2 mortality improvement:
 .PP
 .RS
 .nf
-python withdrawal_projection.py 1000000 65 M FL \\
+python withdrawal_projection.py 1000000 65 M FL --interest 0.04 --improvement
+.fi
+.RE
+.PP
+A joint-life projection using live site quotes and the lognormal model:
+.PP
+.RS
+.nf
+python withdrawal_projection.py 1000000 65 M FL --quotes site \\
     --joint-age 63 --joint-gender F --model lognormal
 .fi
 .RE
@@ -201,20 +256,32 @@ python withdrawal_projection.py 1000000 65 M FL \\
 This program. Exposes \fBbuild_rate_cache()\fR and \fBsimulate_path()\fR for reuse
 by a Monte Carlo (many-paths) driver.
 .TP
+.B annuity_pricing.py
+Local SOA-table annuity pricer (the default pricing source).
+.TP
+.B soa_mortality_2581.csv, soa_mortality_2582.csv
+SOA 2012 IAM base mortality tables (male / female), used by local pricing.
+.TP
+.B soa_mortality_2583.csv, soa_mortality_2584.csv
+SOA Projection Scale G2 improvement tables (male / female), used by
+\fB--improvement\fR.
+.TP
 .B annuity_quote.py
-Fetches and parses the monthly life-annuity payout.
+Fetches and parses live site quotes; used only with \fB--quotes site\fR.
 .TP
 .B equity_model.py
-The joint equity-return / inflation models.
+The equity-return / inflation models.
 .TP
 .B market_data.py
 Embedded historical S&P 500 returns and CPI inflation, 1928\(en2025.
 .SH ENVIRONMENT
 Run with the project virtualenv, which provides NumPy:
 .B ~/finance/planning/.venv/bin/python.
-Network access to immediateannuities.com is required.
+The default local pricing runs offline; network access to immediateannuities.com
+is required only with \fB--quotes site\fR.
 .SH SEE ALSO
 .BR montecarlo (1),
+.BR annuity_pricing (1),
 .BR annuity_quote (1)
 .SH AUTHOR
 Generated for the personal finance planning workspace.

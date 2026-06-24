@@ -1,0 +1,219 @@
+.TH ANNUITY_PRICING 1 "2026-06-23" "finance/planning/annuity" "Annuity Planning Tools"
+.SH NAME
+annuity_pricing \- price a single-premium immediate annuity from SOA mortality tables
+.SH SYNOPSIS
+.B python annuity_pricing.py
+.I amount age gender
+.RB [ --joint-age
+.IR AGE ]
+.RB [ --joint-gender
+.IR M|F ]
+.RB [ --interest
+.IR RATE ]
+.RB [ --improvement ]
+.RB [ --quote-year
+.IR YEAR ]
+.PP
+.B python annuity_pricing.py --compare
+.RB [ --state
+.IR CODE ]
+.RB [ --interest
+.IR RATE ]
+.RB [ --improvement ]
+.RB [ --quote-year
+.IR YEAR ]
+.SH DESCRIPTION
+.B annuity_pricing.py
+prices a single-premium immediate annuity (SPIA) \(em the level lifetime income a
+lump sum buys \(em from a mortality table and a flat interest rate. It is a
+self-contained actuarial calculation with no network access, and serves as the
+default annuity-payout engine for
+.BR withdrawal_projection (1)
+and
+.BR montecarlo (1).
+.PP
+Two products are priced:
+.IP \(bu 2
+a
+.I single-life
+annuity, paying for one life, and
+.IP \(bu 2
+a
+.I last-survivor
+annuity for two lives, paying as long as
+.I either
+person is alive (joint and 100% survivor).
+.PP
+The return value of each is the
+.I annual
+payout (the sum of twelve monthly payments) on the given premium. Because the
+payout is linear in the premium, the rate computed for one dollar scales to any
+amount.
+.SH METHOD
+With a flat interest rate \fIi\fR and survival probabilities \fItpx\fR from the
+mortality table, the actuarial present value of $1 per year of income (paid
+monthly, in arrears, while alive) is
+.PP
+.RS
+.nf
+a_x^(12) ~= a_x + 11/24            (Woolhouse 2-term, m = 12)
+a_x      = sum_{t>=1} v^t * tpx    (annual annuity-immediate)
+v        = 1 / (1 + i)
+.fi
+.RE
+.PP
+and the level annual payout is the premium divided by that factor. For two lives
+the last-survivor factor follows from inclusion-exclusion,
+.RS
+.nf
+a_LS = a_x + a_y - a_xy            (a_xy pays while BOTH live)
+.fi
+.RE
+with the same +11/24 monthly adjustment; the lives are assumed independent. The
+income timing (monthly, first payment in one month) matches the
+immediateannuities.com convention, so the two are directly comparable.
+.PP
+The base mortality is the SOA 2012 IAM table, as of 2012. With
+.B --improvement
+those rates are projected forward
+.I generationally
+using Projection Scale G2:
+.RS
+.nf
+q_a(year) = q_a(2012) * (1 - g2_a) ** (year - 2012)
+.fi
+.RE
+applied as each cohort ages, so the calendar year at attained age \fIa\fR is
+\fIquote-year\fR + (\fIa\fR \- start age). Improvement lengthens lifespans and so
+.I lowers
+the payout. Scale G2 grades to zero by its terminal age; attained ages beyond the
+G2 table simply receive no further improvement.
+.SH OPTIONS
+.TP
+.I amount
+Premium (starting investment). Accepts plain digits, commas, or a leading "$".
+Must be positive.
+.TP
+.I age
+Age today. Integer 0\(en120.
+.TP
+.I gender
+\fBM\fR or \fBF\fR (\fBmale\fR/\fBfemale\fR also accepted). Selects the base
+mortality table.
+.TP
+.BI --joint-age " AGE"
+Second life's age (0\(en120). Switches to a last-survivor annuity. Must be given
+together with \fB--joint-gender\fR.
+.TP
+.BI --joint-gender " M|F"
+Second life's gender. Must be given together with \fB--joint-age\fR.
+.TP
+.BI --interest " RATE"
+Flat annual interest rate as a decimal fraction (e.g. \fB0.04\fR for 4%). Default
+\fB0.035\fR.
+.TP
+.B --improvement
+Apply Scale G2 mortality improvement (generational projection to the quote year).
+Requires the G2 tables \fBsoa_mortality_2583.csv\fR (male) and
+\fBsoa_mortality_2584.csv\fR (female); a clear error is printed if they are
+absent.
+.TP
+.BI --quote-year " YEAR"
+Calendar year to project mortality to for \fB--improvement\fR. Default: the
+current year.
+.TP
+.B --compare
+Benchmark the model against live immediateannuities.com quotes for single and
+joint annuities at ages 60, 65, 70, and 80 (ignores the positional arguments;
+uses a $100,000 premium). Prints model and site annual payouts and their ratio.
+Requires network access.
+.TP
+.BI --state " CODE"
+US state for the site quotes fetched by \fB--compare\fR. Default \fBFL\fR.
+.SH OUTPUT
+For a single pricing run, a line identifying the annuity and parameters, followed
+by the annual payout (with its percentage of the premium) and the equivalent
+monthly payout. For
+.BR --compare ,
+a table over the four ages with one row each for single male, single female, and
+joint male-and-female, showing the model annual payout, the live site annual
+payout, and the model/site ratio.
+.SH ASSUMPTIONS AND CAVEATS
+.IP \(bu 2
+The 2012 IAM rates are
+.I annuitant
+mortality (annuitants live longer than the general population). The model applies
+no insurer expense, profit, or interest-rate load, so at a given interest rate it
+prices a clean actuarial benchmark, not a marketed quote.
+.IP \(bu 2
+At the default 3.5% the model pays noticeably less than current market quotes;
+empirically it matches immediateannuities.com at roughly 5% interest, i.e. the
+site's current quotes imply about a 5% pricing rate. Use
+.B --compare
+to see the gap for your own ages.
+.IP \(bu 2
+The two lives of a last-survivor annuity are assumed independent (no common-shock
+or broken-heart adjustment).
+.IP \(bu 2
+The table's top age (120) is treated as certain death, so the survival curve
+terminates there.
+.SH EXAMPLES
+.PP
+Single-life annuity for a 65-year-old male, $100,000, default 3.5%:
+.PP
+.RS
+.nf
+python annuity_pricing.py 100000 65 M
+.fi
+.RE
+.PP
+Last-survivor annuity for a 65-year-old male and 63-year-old female:
+.PP
+.RS
+.nf
+python annuity_pricing.py 100000 65 M --joint-age 63 --joint-gender F
+.fi
+.RE
+.PP
+Single life at 4% interest with Scale G2 mortality improvement:
+.PP
+.RS
+.nf
+python annuity_pricing.py 100000 70 F --interest 0.04 --improvement
+.fi
+.RE
+.PP
+Benchmark the model against the live site, with improvement applied:
+.PP
+.RS
+.nf
+python annuity_pricing.py --compare --improvement
+.fi
+.RE
+.SH FILES
+.TP
+.B annuity_pricing.py
+This program. Exposes \fBsingle_life_annuity()\fR and
+\fBlast_survivor_annuity()\fR for reuse (e.g. by \fBwithdrawal_projection\fR(1)).
+.TP
+.B soa_mortality_2581.csv, soa_mortality_2582.csv
+SOA 2012 IAM base mortality tables (male / female): one annual mortality rate per
+integer age 0\(en120.
+.TP
+.B soa_mortality_2583.csv, soa_mortality_2584.csv
+SOA Projection Scale G2 improvement tables (male / female), used by
+\fB--improvement\fR.
+.TP
+.B annuity_quote.py
+Fetches the live site quotes compared by \fB--compare\fR.
+.SH ENVIRONMENT
+Run with any of the project's Python 3 interpreters, e.g.
+.B ~/finance/planning/.venv/bin/python.
+No third-party packages are required. Network access is needed only for
+.BR --compare .
+.SH SEE ALSO
+.BR withdrawal_projection (1),
+.BR montecarlo (1),
+.BR annuity_quote (1)
+.SH AUTHOR
+Generated for the personal finance planning workspace.
