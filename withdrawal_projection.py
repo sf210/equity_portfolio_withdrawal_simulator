@@ -58,6 +58,7 @@ import numpy as np
 
 import annuity_pricing
 import annuity_quote
+import rate_model
 from equity_model import JointReturnModel
 
 REF_PREMIUM = 100_000  # payout is linear in premium; quote this and scale.
@@ -117,17 +118,25 @@ class LocalRateCache:
         self.quote_year = quote_year
         self._cache: dict[tuple[int, int | None], float] = {}
 
-    def monthly_rate(self, age: int, joint_age: int | None = None) -> float:
-        key = (age, joint_age)
+    def monthly_rate(self, age: int, joint_age: int | None = None,
+                     interest: float | None = None) -> float:
+        # interest=None uses the cache's fixed rate; otherwise price at the given
+        # rate (bucketed to 1bp so dynamic-rate paths still reuse the cache).
+        if interest is None:
+            rate = self.interest_rate
+            key = (age, joint_age, None)
+        else:
+            rate = round(interest, 4)
+            key = (age, joint_age, rate)
         if key not in self._cache:
             if joint_age is None:
                 annual = annuity_pricing.single_life_annuity(
-                    1.0, age, self.gender, self.interest_rate,
+                    1.0, age, self.gender, rate,
                     self.improvement, self.quote_year)
             else:
                 annual = annuity_pricing.last_survivor_annuity(
                     1.0, age, self.gender, joint_age, self.joint_gender,
-                    self.interest_rate, self.improvement, self.quote_year)
+                    rate, self.improvement, self.quote_year)
             self._cache[key] = annual / 12.0
         return self._cache[key]
 
@@ -186,14 +195,19 @@ def restate_equity_at_inflation(equity_returns, hist_inflation, inflation):
 
 def simulate_path(amount, age, gender, state, equity_returns,
                   rate_cache, inflation=DEFAULT_INFLATION, joint_age=None,
-                  collect_rows=True, upper_bound=None, lower_bound=None):
+                  collect_rows=True, upper_bound=None, lower_bound=None,
+                  interest_path=None):
     """Run one withdrawal path.
 
     equity_returns is a decimal-fraction array of length N (one per year).
-    inflation is a single constant decimal fraction applied every year (used
-    only to express withdrawals/balances in today's dollars). Returns a dict
-    with payout/balance arrays and summary totals; set collect_rows=False to
-    skip the per-year detail dicts when running many Monte Carlo paths.
+    inflation is either a single constant decimal fraction applied every year, or
+    a length-N array of per-year inflation (dynamic mode); it is used to express
+    withdrawals/balances in today's dollars. interest_path, if given, is a
+    length-N array of per-year annuity discount rates -- each year's payout is
+    priced at that rate (dynamic mode); when None the rate cache's fixed rate is
+    used. Returns a dict with payout/balance arrays and summary totals; set
+    collect_rows=False to skip the per-year detail dicts when running many Monte
+    Carlo paths.
 
     upper_bound / lower_bound, if given, cap and floor the annual withdrawal in
     today's dollars at that factor of year 1's withdrawal (e.g. upper_bound=1.2
@@ -202,6 +216,11 @@ def simulate_path(amount, age, gender, state, equity_returns,
     """
     years = len(equity_returns)
     has_joint = joint_age is not None
+
+    # inflation may be a scalar (constant) or a per-year array (dynamic).
+    infl_arr = np.asarray(inflation, dtype=float)
+    if infl_arr.ndim == 0:
+        infl_arr = np.full(years, float(inflation))
 
     balance = float(amount)
     cum_infl = 1.0
@@ -214,11 +233,13 @@ def simulate_path(amount, age, gender, state, equity_returns,
     for t in range(years):
         cur_age = age + t
         cur_joint = (joint_age + t) if has_joint else None
-        monthly = balance * rate_cache.monthly_rate(cur_age, cur_joint)
+        rate = None if interest_path is None else float(interest_path[t])
+        monthly = balance * rate_cache.monthly_rate(cur_age, cur_joint, rate)
         annual_withdrawal = 12.0 * monthly
 
         eq = float(equity_returns[t])
-        cum_infl *= (1.0 + inflation)
+        infl = float(infl_arr[t])
+        cum_infl *= (1.0 + infl)
 
         # Optional cap/floor in today's dollars, anchored to year 1's withdrawal.
         real_withdrawal = annual_withdrawal / cum_infl
@@ -248,7 +269,8 @@ def simulate_path(amount, age, gender, state, equity_returns,
                 "payout": annual_withdrawal,
                 "payout_real": real_withdrawal,
                 "equity_return": eq,
-                "inflation": inflation,
+                "inflation": infl,
+                "rate": rate,
                 "balance_end": balance,
                 "balance_end_real": balance / cum_infl,
             })
@@ -266,16 +288,20 @@ def simulate_path(amount, age, gender, state, equity_returns,
 def _print_report(result, model_summary):
     print(model_summary)
     print()
+    rows = result["rows"]
+    has_rate = bool(rows) and rows[0].get("rate") is not None
+    rate_h = f"{'Rate':>6} " if has_rate else ""
     hdr = (f"{'Yr':>2} {'Age':>3} {'Balance start':>15} "
            f"{'Annual':>14} "
-           f"{'Equity':>7} {'CPI':>6} {'Balance end':>15}")
+           f"{'Equity':>7} {'CPI':>6} {rate_h}{'Balance end':>15}")
     print(hdr)
     print("-" * len(hdr))
-    for r in result["rows"]:
+    for r in rows:
+        rate_c = f"{r['rate']:>6.1%} " if has_rate else ""
         print(f"{r['year']:>2} {r['age']:>3} {r['balance_start']:>15,.0f} "
               f"{r['payout']:>14,.0f} "
               f"{r['equity_return']:>+7.1%} {r['inflation']:>+6.1%} "
-              f"{r['balance_end']:>15,.0f}")
+              f"{rate_c}{r['balance_end']:>15,.0f}")
     print()
     print(f"Ending balance (nominal):     ${result['ending_balance']:>15,.0f}")
     print(f"Cumulative inflation factor:   {result['cum_inflation_factor']:>15.2f}x")
@@ -316,6 +342,14 @@ def main(argv=None) -> int:
                    help="apply Scale G2 mortality improvement (--quotes local only)")
     p.add_argument("--quote-year", type=int, default=None,
                    help="year to project mortality to for --improvement (default: current)")
+    p.add_argument("--dynamic-rates", action="store_true",
+                   help="dynamic mode: use the per-year sampled inflation directly "
+                        "and evolve the annuity discount rate with it via the "
+                        "error-correction model in rate_model.py (local pricing only; "
+                        "ignores --inflation and --interest)")
+    p.add_argument("--initial-rate", type=float, default=rate_model.DEFAULT_INITIAL_RATE,
+                   help="starting 10-year rate for --dynamic-rates "
+                        f"(default {rate_model.DEFAULT_INITIAL_RATE})")
     p.add_argument("--upper-bound", type=float, default=None,
                    help="cap annual withdrawal at this factor of year-1's "
                         "withdrawal, in today's dollars (e.g. 1.2)")
@@ -336,11 +370,22 @@ def main(argv=None) -> int:
         p.error("--lower-bound must not exceed --upper-bound")
     if args.inflation <= -1:
         p.error("--inflation must be greater than -1 (i.e. > -100%)")
+    if args.dynamic_rates and args.quotes != "local":
+        p.error("--dynamic-rates requires --quotes local")
 
     model = JointReturnModel(args.model, block_length=args.block_length)
     rng = np.random.default_rng(args.seed)
-    equity, hist_inflation = model.sample_path(args.years, rng)
-    equity = restate_equity_at_inflation(equity, hist_inflation, args.inflation)
+    equity, sampled_inflation = model.sample_path(args.years, rng)
+
+    if args.dynamic_rates:
+        # Use the sampled inflation directly (no restatement); evolve the rate.
+        inflation = sampled_inflation
+        irm = rate_model.InterestRateModel(initial_rate=args.initial_rate)
+        interest_path = irm.sample_path(sampled_inflation, rng)
+    else:
+        equity = restate_equity_at_inflation(equity, sampled_inflation, args.inflation)
+        inflation = args.inflation
+        interest_path = None
 
     try:
         rate_cache = build_rate_cache(
@@ -349,9 +394,10 @@ def main(argv=None) -> int:
             improvement=args.improvement, quote_year=args.quote_year)
         result = simulate_path(
             amount=args.amount, age=args.age, gender=args.gender, state=args.state,
-            equity_returns=equity, inflation=args.inflation,
+            equity_returns=equity, inflation=inflation,
             rate_cache=rate_cache, joint_age=args.joint_age,
             upper_bound=args.upper_bound, lower_bound=args.lower_bound,
+            interest_path=interest_path,
         )
     except (annuity_quote.QuoteError, urllib.error.URLError,
             FileNotFoundError) as exc:

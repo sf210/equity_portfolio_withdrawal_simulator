@@ -113,18 +113,25 @@ class MonteCarloGUI:
         row(7, 2, "Interest")
         self.interest = entry(7, 2, str(mc.annuity_pricing.DEFAULT_INTEREST))
 
+        self.dynamic = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text="Dynamic inflation + rate (local only)",
+                        variable=self.dynamic).grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=2)
+        row(8, 2, "Initial rate")
+        self.initial_rate = entry(8, 2, str(mc.rate_model.DEFAULT_INITIAL_RATE))
+
         self.improvement = tk.BooleanVar(value=False)
         ttk.Checkbutton(frm, text="Scale G2 mortality improvement (local only)",
                         variable=self.improvement).grid(
-            row=8, column=0, columnspan=3, sticky="w", pady=2)
+            row=9, column=0, columnspan=2, sticky="w", pady=2)
 
         self.submit = ttk.Button(frm, text="Submit", command=self.on_submit)
-        self.submit.grid(row=8, column=3, sticky="e", padx=(0, 12), pady=(6, 2))
+        self.submit.grid(row=9, column=3, sticky="e", padx=(0, 12), pady=(6, 2))
         # Enter on the focused Submit button runs the simulation.
         self.submit.bind("<Return>", lambda _e: self.on_submit())
 
         self.status = ttk.Label(frm, text="Ready.")
-        self.status.grid(row=9, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self.status.grid(row=10, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
     def _build_output(self):
         frm = ttk.Frame(self.root, padding=(8, 0))
@@ -199,6 +206,10 @@ class MonteCarloGUI:
         if interest <= -1:
             raise ValueError("Interest must be greater than -1 (i.e. > -100%).")
         improvement = bool(self.improvement.get())
+        dynamic = bool(self.dynamic.get())
+        initial_rate = float(self.initial_rate.get())
+        if dynamic and quotes != "local":
+            raise ValueError("Dynamic rates require the local quotes source.")
 
         def factor(widget):
             v = _optional(widget.get())
@@ -223,6 +234,7 @@ class MonteCarloGUI:
             block_length=block_length, seed=seed,
             inflation=inflation, upper_bound=upper, lower_bound=lower,
             quotes=quotes, interest=interest, improvement=improvement,
+            dynamic_rates=dynamic, initial_rate=initial_rate,
         )
 
     # ----- actions -----------------------------------------------------------

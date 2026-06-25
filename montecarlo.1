@@ -25,6 +25,9 @@ montecarlo \- Monte Carlo confidence intervals for annuity-equivalent withdrawal
 .RB [ --improvement ]
 .RB [ --quote-year
 .IR YEAR ]
+.RB [ --dynamic-rates ]
+.RB [ --initial-rate
+.IR RATE ]
 .RB [ --upper-bound
 .IR FACTOR ]
 .RB [ --lower-bound
@@ -142,6 +145,17 @@ Apply SOA Projection Scale G2 mortality improvement. Used only with
 Calendar year to project mortality to for \fB--improvement\fR. Default: current
 year.
 .TP
+.B --dynamic-rates
+Dynamic mode: each path's per-year sampled inflation drives both the deflator and
+an annuity discount rate that evolves with it (error-correction model in
+\fBrate_model.py\fR), so higher-inflation paths get higher yields and larger
+nominal payouts. Requires \fB--quotes local\fR; ignores \fB--inflation\fR and
+\fB--interest\fR.
+.TP
+.BI --initial-rate " RATE"
+Starting 10-year rate the dynamic paths begin from, as a decimal fraction. Used
+only with \fB--dynamic-rates\fR. Default \fB0.043\fR.
+.TP
 .BI --upper-bound " FACTOR"
 Cap each path's annual withdrawal, in today's dollars, at this factor of that
 path's first-year withdrawal (e.g. \fB1.2\fR). Must be positive. Default: no cap.
@@ -234,6 +248,14 @@ python montecarlo.py 1000000 65 M FL --interest 0.04 --improvement
 .fi
 .RE
 .PP
+Dynamic inflation with a discount rate that tracks it:
+.PP
+.RS
+.nf
+python montecarlo.py 1000000 65 M FL --dynamic-rates --model block
+.fi
+.RE
+.PP
 2000 paths with live site quotes, the block bootstrap, and a fixed seed:
 .PP
 .RS
@@ -268,6 +290,10 @@ Provides \fBbuild_rate_cache()\fR and \fBsimulate_path()\fR, reused for every pa
 .B annuity_pricing.py
 Local SOA-table annuity pricer (the default pricing source) and its mortality
 tables \fBsoa_mortality_258{1,2}.csv\fR (base) and \fB258{3,4}.csv\fR (Scale G2).
+.TP
+.B rate_model.py
+Dynamic discount-rate model used by \fB--dynamic-rates\fR (fit to FRED GS10
+yields and CPI; see \fBfit_rate_model.py\fR and \fBFIT.pdf\fR).
 .TP
 .B equity_model.py
 The equity-return / inflation models.

@@ -9,7 +9,9 @@ SOA 2012 IAM mortality tables; live quotes from
 [immediateannuities.com](https://www.immediateannuities.com/) are available as an
 opt-in alternative (`--quotes site`). Equity-return scenarios are driven by
 historical S&P 500 data (1928–2025); inflation is a constant assumption
-(default 2.5%) used to express results in today's dollars.
+(default 2.5%) used to express results in today's dollars — or, with
+`--dynamic-rates`, it varies year to year and **drives an evolving annuity
+discount rate** fit to historical Treasury yields (see `METHODOLOGY.pdf`).
 
 ## Disclaimer
 
@@ -63,6 +65,7 @@ Data flows one direction, from annuity pricing + historical data into a projecti
 ```
 soa_mortality_258*.csv ──> annuity_pricing.py ─┐   (local, default)
 immediateannuities.com ──> annuity_quote.py ───┤   (site, --quotes site)
+market_data.py ──> rate_model.py ──────────────┤   (dynamic discount rate)
                                                ├─> withdrawal_projection.py ──> montecarlo.py ──> montecarlo_gui.py
 market_data.py ──> equity_model.py ────────────┘     (one random path)         (many paths + CIs)   (Tk front-end)
 ```
@@ -129,8 +132,20 @@ python annuity_quote.py 100000 65 M FL | awk '{print $1*12}'
 ### `market_data.py`
 Not a CLI — a data module. Holds the paired historical series of S&P 500 nominal
 total returns and CPI annual-average inflation, 1928–2025, keyed by year so the
-two stay aligned. Exposes `equity_returns()` and `inflation_rates()` as decimal
-fractions.
+two stay aligned, plus the annual 10-year Treasury yield (FRED `GS10`, from 1953)
+used to fit the dynamic rate model. Exposes `equity_returns()`,
+`inflation_rates()`, and `treasury_10y_regression_data()`.
+
+### `rate_model.py`
+The **dynamic discount-rate model** (used by `--dynamic-rates`). The annuity
+discount rate is not fixed: it partially adjusts each year toward a long-run
+Fisher target driven by the *previous* year's inflation (an error-correction
+model), so higher-inflation paths get higher yields and larger nominal payouts,
+while the implied real rate compresses — and can go briefly negative — when
+inflation spikes, as in 2021–22. Parameters are **fit by OLS** to historical
+10-year Treasury yields and CPI (1954–2025; `a ≈ 1.7%`, `b ≈ 1.13`, `λ ≈ 0.17`,
+R² ≈ 0.93). `fit_rate_model.py` prints the fit and regenerates `FIT.md`/`FIT.pdf`;
+the full derivation, error exhibits, and graphs are in `METHODOLOGY.pdf`.
 
 ### `equity_model.py`
 The scenario generator. `JointReturnModel` samples one-year `(equity return,
@@ -145,13 +160,14 @@ relationship. Three modes:
 - **`lognormal`** — draw from a bivariate normal fitted to the log series; smooth
   but understates tail risk.
 
-> **Note:** the simulators no longer use the *sampled* inflation directly.
-> Inflation is now a constant assumption (`--inflation`, default 2.5%); the
-> simulators take each sampled year's paired historical inflation only to **restate**
-> the equity return onto that constant basis (strip out the embedded historical
-> inflation, keep the real return, re-apply the constant). So historical inflation
-> has no residual effect on equity, while its correlation is still what makes the
-> joint draw meaningful.
+> **Note — how inflation is used.** In the default (constant) mode the simulators
+> don't use the *sampled* inflation directly: inflation is a constant assumption
+> (`--inflation`, default 2.5%) and each sampled year's paired historical inflation
+> is used only to **restate** the equity return onto that constant basis (strip out
+> the embedded historical inflation, keep the real return, re-apply the constant).
+> Under `--dynamic-rates` the sampled inflation **is** used directly — to deflate to
+> today's dollars and to drive the discount rate (`rate_model.py`) — and equity is
+> left as drawn, so the historical equity/inflation pairing stays intact.
 
 Run it directly to print the calibrated statistics:
 
@@ -171,6 +187,8 @@ age-90 rate (the site's maximum), while the local pricer handles any age.
   `--years` (default 30), `--inflation` (default 0.025), `--model`,
   `--block-length`, the pricing flags `--quotes local|site` (default `local`),
   `--interest` (default 0.035), `--improvement`, `--quote-year`,
+  `--dynamic-rates`/`--initial-rate` (dynamic inflation + discount rate; see
+  [`rate_model.py`](#rate_modelpy)),
   `--upper-bound`/`--lower-bound` (see [Withdrawal bounds](#withdrawal-bounds)),
   and `--seed`. The `state` argument is only used with `--quotes site`.
 - **Output:** a calibration header, a year-by-year table (balance, **annual**
@@ -191,6 +209,9 @@ python withdrawal_projection.py 1000000 65 M FL --quotes site \
 
 # block bootstrap with 10-year blocks
 python withdrawal_projection.py 1000000 70 F CA --model block --block-length 10
+
+# dynamic inflation with a discount rate that tracks it
+python withdrawal_projection.py 1000000 65 M FL --dynamic-rates --model block
 
 # cap real spending at 120% and floor it at 50% of year 1
 python withdrawal_projection.py 1000000 65 M FL --upper-bound 1.2 --lower-bound 0.5
@@ -219,8 +240,9 @@ regardless of the number of simulations; with the default local pricing this is
 instant and offline.
 
 - **Inputs:** same as `withdrawal_projection.py` (including `--inflation`, the
-  pricing flags `--quotes`/`--interest`/`--improvement`/`--quote-year`, and
-  `--upper-bound`/`--lower-bound`), plus `--sims` (default 5000).
+  pricing flags `--quotes`/`--interest`/`--improvement`/`--quote-year`,
+  `--dynamic-rates`/`--initial-rate`, and `--upper-bound`/`--lower-bound`), plus
+  `--sims` (default 5000).
 - A "C% confidence interval" is the central interval covering C% of outcomes
   (e.g. 80% = the 10th–90th percentile range).
 - The ending-balance (today's dollars) block also reports the **worst single-year**
@@ -242,6 +264,9 @@ python montecarlo.py 1000000 65 M FL
 # local pricing at 4% with Scale G2 mortality improvement
 python montecarlo.py 1000000 65 M FL --interest 0.04 --improvement
 
+# dynamic inflation + discount rate that tracks it
+python montecarlo.py 1000000 65 M FL --dynamic-rates --model block
+
 # 2000 paths via live site quotes, block bootstrap, fixed seed
 python montecarlo.py 1000000 65 M FL --quotes site --sims 2000 --model block --seed 1
 
@@ -257,8 +282,9 @@ simulation without the command line.
 ![The Monte Carlo GUI](mc_gui.png)
 
 The top **Inputs** panel collects exactly the same parameters as the command
-line, including **Inflation**, the **Quotes** source (local/site), **Interest**,
-and a **Scale G2 mortality improvement** checkbox. Fields with a fixed set of
+line, including **Inflation**, the **Quotes** source (local/site), **Interest**, a
+**Dynamic inflation + rate** checkbox with its **Initial rate**, and a **Scale G2
+mortality improvement** checkbox. Fields with a fixed set of
 choices — **Gender**, **State**, **Model**, **Joint gender**, and **Quotes** — are
 drop-downs; the rest are text entries, and blank optional fields (joint
 age/gender, upper/lower bound, seed) are simply omitted. The whole form is
@@ -297,8 +323,19 @@ man ./montecarlo.1
 man ./annuity_pricing.1
 ```
 
-(`annuity_quote.py`, `equity_model.py`, `market_data.py`, and `montecarlo_gui.py`
-do not have man pages; see the docstrings and `--help`.)
+(`annuity_quote.py`, `equity_model.py`, `market_data.py`, `rate_model.py`, and
+`montecarlo_gui.py` do not have man pages; see the docstrings and `--help`.)
+
+## Methodology documents
+
+- **`METHODOLOGY.pdf`** (source `METHODOLOGY.md`) — how the whole Monte Carlo
+  works end to end: the scenario model, annuity pricing, the dynamic
+  inflation/rate model with its **fit, error exhibits, and graphs**, assumptions,
+  and cited sources.
+- **`FIT.pdf`** (source `FIT.md`, regenerated by `fit_rate_model.py --markdown`) —
+  a focused report of the interest-rate model fit (OLS estimates, diagnostics).
+
+Both are regenerated from Markdown; see the build steps in those source files.
 
 ## License
 
