@@ -229,6 +229,7 @@ def simulate_path(amount, age, gender, state, equity_returns,
     rows = []
     payouts_nominal = np.empty(years)
     payouts_real = np.empty(years)
+    balances_real = np.empty(years)
 
     for t in range(years):
         cur_age = age + t
@@ -255,12 +256,23 @@ def simulate_path(amount, age, gender, state, equity_returns,
             real_withdrawal = floor_real
             annual_withdrawal = real_withdrawal * cum_infl
 
+        # Never withdraw more than the balance on hand, and never let the balance
+        # go negative. A floor (or a very high annuity rate at extreme ages) could
+        # otherwise demand more cash than is left; once depleted the balance stays
+        # at zero and later withdrawals are zero.
+        if annual_withdrawal > balance:
+            annual_withdrawal = balance
+            real_withdrawal = annual_withdrawal / cum_infl
+
         balance_start = balance
         balance = (balance - annual_withdrawal) * (1.0 + eq)
+        if balance < 0.0:
+            balance = 0.0
 
         # Payout is reported as the annual amount (monthly x 12).
         payouts_nominal[t] = annual_withdrawal
         payouts_real[t] = real_withdrawal
+        balances_real[t] = balance / cum_infl
         if collect_rows:
             rows.append({
                 "year": t + 1,
@@ -282,6 +294,7 @@ def simulate_path(amount, age, gender, state, equity_returns,
         "cum_inflation_factor": cum_infl,
         "payouts_nominal": payouts_nominal,
         "payouts_real": payouts_real,
+        "balances_real": balances_real,
     }
 
 

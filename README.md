@@ -41,9 +41,10 @@ estimated" figures, not binding offers.
 Requires **Python 3.14**. The default local annuity pricing runs fully offline;
 network access is only needed for the opt-in live quotes (`--quotes site`) and the
 `annuity_pricing.py --compare` benchmark. The only third-party dependency needed
-to run the simulations is **NumPy**; the **markdown** package is an optional
-docs-only dependency, used solely to regenerate `README.html` from `README.md`.
-The Tk GUI uses `tkinter` from the standard library.
+to run the simulations is **NumPy**; **matplotlib** is an optional dependency
+needed only for the graphical PDF report, and the **markdown** package is an
+optional docs-only dependency, used solely to regenerate `README.html` from
+`README.md`. The Tk GUI uses `tkinter` from the standard library.
 
 ```bash
 git clone git@github.com:sf210/equity_portfolio_withdrawal_simulator.git
@@ -245,17 +246,21 @@ instant and offline.
   `--sims` (default 5000).
 - A "C% confidence interval" is the central interval covering C% of outcomes
   (e.g. 80% = the 10th–90th percentile range).
+- Each year's withdrawal is capped at the available balance, so the balance
+  **never goes negative**; a path that depletes holds at zero (withdrawing zero)
+  for its remaining years. The PDF report's balance chart uses a
+  pseudo-log (symlog) y-axis so depletion to $0 and the wide tail-to-tail spread
+  are both legible.
 - The ending-balance (today's dollars) block also reports the **worst single-year**
   and **worst cumulative five-year** *real* (inflation-adjusted) equity total
   return seen anywhere in the simulation.
-- When run interactively it then offers to save the full report to a **PDF** or
+- When run interactively it then offers to save the report to a **PDF** or
   **CSV** file (type `PDF`, `csv`, or `exit` at the prompt); after each save it
   asks again, so you can write several files, and keeps prompting until you type
-  `exit`. The PDF — written with
-  a small built-in writer, no extra dependencies — is a landscape page headed with
-  your username and the local date/time, with the two ending-balance tables side by
-  side and the annual-payout table below; on multi-page reports the heading repeats
-  in the footer. The prompt is skipped when output is piped or redirected.
+  `exit`. The **PDF** is a single consolidated, figure-rich report
+  (`report_pdf.py`, matplotlib): summary cards, the balance fan chart,
+  median/stress-scenario charts, and a per-year table — see the GUI section below.
+  The prompt is skipped when output is piped or redirected.
 
 ```bash
 # default 5000-path run (local pricing, offline)
@@ -299,8 +304,23 @@ the window stays responsive while the annuity-rate cache is built (instantly for
 local pricing; over the network for the site source). When it finishes, the full
 report appears in the scrollable monospaced panel and the bottom buttons activate:
 
-- **Export PDF** / **Export CSV** — save the most recent report via a file
-  dialog, using the same writers as the command-line tool.
+- **Export PDF** — save the single consolidated, figure-rich report
+  (`report_pdf.py`, matplotlib). Page 1 leads with two **summary cards** (the
+  ending-balance distribution in today's and nominal dollars — mean, median, the
+  80/90/95/99% central intervals, and the worst real equity returns) and a
+  highlighted downside line, above a **fan chart** of the end-of-year balance
+  distribution in today's dollars (median plus central-interval bands, shaded
+  green above the median and red below, darkening toward the tails so the
+  unfavourable region stands out, on a pseudo-log y-axis so depletion to $0 is
+  visible). A **Median and Stress Scenarios** section follows, pairing a dual-axis
+  market-return / inflation / discount-rate chart with the mean/min/max annual
+  withdrawal and ending balance for the median, 10th-, 2.5th-, and
+  0.5th-percentile ending-balance paths, and finally a paginated **per-year
+  summary table**.
+- **Export CSV** — save the most recent report as numeric rows via a file dialog,
+  using the same writer as the command-line tool.
+- **Docs** (README / Methodology / Fit notes) — open the bundled documentation in
+  the OS default viewer; available at any time, independent of a run.
 - **Exit** — close the window.
 
 Run it with a Python build that includes tkinter (the project `.venv` does):

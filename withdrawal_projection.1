@@ -54,7 +54,9 @@ instead fetches live quotes from
 (immediateannuities.com). Because the payout is linear in the premium, a single
 reference rate is computed per age and scaled to the balance.
 .IP 2. 4
-Withdraws twelve times that monthly payout from the balance.
+Withdraws twelve times that monthly payout from the balance, capped at the
+balance available (the balance never goes negative; once depleted it stays at
+zero and later withdrawals are zero).
 .IP 3. 4
 Grows the remaining balance by that year's nominal equity return.
 .IP 4. 4

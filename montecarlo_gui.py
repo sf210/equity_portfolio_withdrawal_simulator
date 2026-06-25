@@ -13,8 +13,12 @@ no mouse is needed. The simulation runs on a background thread to keep the
 window responsive while it builds the annuity-rate cache (local pricing by
 default; "site" warms it over the network).
 
-Below the report there are Export PDF, Export CSV, and Exit buttons; the export
-buttons reuse montecarlo.write_pdf / write_csv and act on the most recent run.
+Below the report there are Export PDF, Export CSV, and Exit buttons. "Export PDF"
+renders the single consolidated report in report_pdf.py (summary cards, the
+balance fan chart, median/stress scenario charts, and the per-year table);
+"Export CSV" reuses montecarlo.write_csv. Both act on the most recent run. A row
+of Docs buttons opens the bundled README / methodology / fit-notes documents in
+the OS default viewer, independent of any run.
 
 Run with a Python that has tkinter (the project .venv does):
     ~/finance/planning/.venv/bin/python montecarlo_gui.py
@@ -23,13 +27,37 @@ Run with a Python that has tkinter (the project .venv does):
 from __future__ import annotations
 
 import argparse
+import os
+import pathlib
 import queue
+import subprocess
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, font, messagebox, ttk
 
 import annuity_quote
 import montecarlo as mc
+
+# Directory holding this script and its sibling documentation files.
+_HERE = pathlib.Path(__file__).resolve().parent
+
+# Documentation files reachable from the Docs buttons: (label, filename).
+_DOCS = [
+    ("README", "README.html"),
+    ("Methodology", "METHODOLOGY.pdf"),
+    ("Fit notes", "FIT.pdf"),
+]
+
+
+def _open_file(path: pathlib.Path):
+    """Open a file in the OS default application."""
+    if sys.platform.startswith("darwin"):
+        subprocess.Popen(["open", str(path)])
+    elif os.name == "nt":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 
 def _optional(text):
@@ -50,9 +78,8 @@ class MonteCarloGUI:
         root.title("Annuity-equivalent Monte Carlo")
 
         self._queue: queue.Queue = queue.Queue()
-        self._last_pdf_body = None
-        self._last_footer = None
         self._last_csv_kwargs = None
+        self._last_report_data = None
 
         mono = font.nametofont("TkFixedFont").copy()
         mono.configure(size=9)
@@ -171,6 +198,16 @@ class MonteCarloGUI:
         self.export_csv.pack(side="left", padx=(8, 0))
         exit_btn.pack(side="right")
 
+        # Documentation buttons: always available, independent of any run.
+        ttk.Separator(frm, orient="vertical").pack(side="left", fill="y",
+                                                    padx=10)
+        ttk.Label(frm, text="Docs:").pack(side="left", padx=(0, 4))
+        for label, filename in _DOCS:
+            ttk.Button(
+                frm, text=label, width=11,
+                command=lambda fn=filename: self.on_open_doc(fn),
+            ).pack(side="left", padx=(0, 4))
+
     # ----- helpers -----------------------------------------------------------
     def _set_output(self, text):
         self.output.configure(state="normal")
@@ -282,28 +319,43 @@ class MonteCarloGUI:
             messagebox.showerror("Simulation failed", str(payload))
             return
 
-        report_text, pdf_body, footer_text, csv_kwargs = payload
-        self._last_pdf_body = pdf_body
-        self._last_footer = footer_text
+        report_text, csv_kwargs, report_data = payload
         self._last_csv_kwargs = csv_kwargs
+        self._last_report_data = report_data
         self._set_output(report_text)
         self.export_pdf.configure(state="normal")
         self.export_csv.configure(state="normal")
         self.status.configure(text="Done.")
 
+    def on_open_doc(self, filename):
+        path = _HERE / filename
+        if not path.exists():
+            messagebox.showerror("Not found", f"{filename} is not in {_HERE}.")
+            return
+        try:
+            _open_file(path)
+        except OSError as exc:
+            messagebox.showerror("Could not open", str(exc))
+            return
+        self.status.configure(text=f"Opened {filename}")
+
     def on_export_pdf(self):
-        if self._last_pdf_body is None:
+        if self._last_report_data is None:
             return
         path = filedialog.asksaveasfilename(
-            title="Export PDF", defaultextension=".pdf",
+            title="Export PDF report", defaultextension=".pdf",
             initialfile="montecarlo_report.pdf",
             filetypes=[("PDF", "*.pdf"), ("All files", "*.*")])
         if not path:
             return
+        self.status.configure(text="Rendering PDF report...")
+        self.root.update_idletasks()
         try:
-            mc.write_pdf(path, self._last_pdf_body, self._last_footer)
-        except OSError as exc:
+            import report_pdf
+            report_pdf.write_report_pdf(path, self._last_report_data)
+        except (OSError, ValueError) as exc:
             messagebox.showerror("Export failed", str(exc))
+            self.status.configure(text="Error.")
             return
         self.status.configure(text=f"Wrote {path}")
 

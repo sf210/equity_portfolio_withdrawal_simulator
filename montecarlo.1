@@ -201,18 +201,24 @@ Save output to a file? [PDF / csv / exit]:
 .fi
 .RE
 .PP
-Type \fBPDF\fR to write a PDF, \fBcsv\fR to write a CSV, or \fBexit\fR (or just
-press Enter) to finish. Each choice asks for a filename and offers a default.
-After a file is written the prompt repeats, so several files can be saved in one
-run; it keeps asking until \fBexit\fR is entered. The prompt is skipped entirely
-when input is not a terminal (e.g. piped or redirected), so scripted runs are
-unaffected.
+Type \fBPDF\fR to write the consolidated PDF report, \fBcsv\fR to write a CSV, or
+\fBexit\fR (or just press Enter) to finish. Each choice asks for a filename and
+offers a default. After a file is written the prompt repeats, so several files can
+be saved in one run; it keeps asking until \fBexit\fR is entered. The prompt is
+skipped entirely when input is not a terminal (e.g. piped or redirected), so
+scripted runs are unaffected.
 .PP
-The \fBPDF\fR is a landscape report containing the full output: the username and
-local date/time at the top, the two ending-balance tables (today's and nominal
-dollars) side by side, and the annual-payout table below them. If the report
-spans more than one page, the username and date/time are repeated, with a page
-counter, in the footer of every page after the first.
+The \fBPDF\fR is a single figure-rich report (\fBreport_pdf.py\fR, matplotlib).
+Page 1 leads with two summary cards \(em the ending-balance distribution in
+today's and nominal dollars (mean, median, and the 80/90/95/99% central
+intervals, plus the worst real equity returns) and a highlighted downside line
+\(em above a fan chart of the end-of-year balance distribution in today's dollars
+(median plus central-interval bands, shaded green above the median and red below,
+darkening toward the tails, on a pseudo-log y-axis so depletion to zero is
+visible). A "Median and Stress Scenarios" section follows with a dual-axis
+market-return / inflation / discount-rate chart and withdrawal statistics for the
+median, 10th-, 2.5th-, and 0.5th-percentile ending-balance paths, and finally a
+paginated per-year summary table. Requires matplotlib.
 .PP
 The \fBCSV\fR contains the ending-balance summary (both bases, with the worst-
 return figures) and the full per-year payout table, as numeric rows suitable for
@@ -223,7 +229,9 @@ This models withdrawing the annuity-\fIequivalent\fR amount while staying invest
 in equities; it is \fBnot\fR an annuity purchase (no mortality pooling, no income
 guarantee). Because the full annuity payout includes return of principal, the
 withdrawal rate is high and the real balance typically erodes over time \(em often
-finishing below the starting amount. This is expected model behavior.
+finishing below the starting amount. This is expected model behavior. Each year's
+withdrawal is capped at the available balance, so the balance never goes negative;
+a fully depleted path holds at zero (and withdraws zero) for its remaining years.
 .IP \(bu 2
 Local pricing (the default) uses the SOA 2012 IAM tables at a flat
 \fB--interest\fR rate with no insurer expense or profit load, and handles any
@@ -281,8 +289,13 @@ used by both the command line and the Tk GUI.
 .B montecarlo_gui.py
 A Tcl/Tk front-end for this program: a form of the same inputs (with drop-downs
 for the fixed-choice fields), a Submit button reachable by Tab and activated by
-Enter, and Export PDF / Export CSV / Exit buttons. Run with a Python that has
-tkinter, e.g. \fB~/finance/planning/.venv/bin/python montecarlo_gui.py\fR.
+Enter, Export PDF / Export CSV / Exit buttons, and Docs buttons that open the
+bundled README and methodology / fit PDFs. Run with a Python that has tkinter,
+e.g. \fB~/finance/planning/.venv/bin/python montecarlo_gui.py\fR.
+.TP
+.B report_pdf.py
+Renders the consolidated (matplotlib) PDF report from a finished run; used by the
+\fBPDF\fR export choice and the GUI's Export PDF button.
 .TP
 .B withdrawal_projection.py
 Provides \fBbuild_rate_cache()\fR and \fBsimulate_path()\fR, reused for every path.

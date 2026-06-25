@@ -92,8 +92,11 @@ def run(amount, age, gender, state, joint_age, joint_gender,
     via rate_model.InterestRateModel, starting from initial_rate (local pricing).
 
     Returns (jrm, ending_nominal, ending_real, payouts_nominal, payouts_real,
-    equities, inflations) with the payout/return arrays shaped (sims, years);
-    inflations holds the per-year inflation actually used to deflate each path.
+    equities, inflations, balances_real, interests) with the per-year arrays
+    shaped (sims, years); inflations holds the per-year inflation actually used to
+    deflate each path, balances_real the end-of-year balance in today's dollars,
+    and interests the per-year annuity discount rate (the fixed rate in static
+    local mode, NaN for static site quotes, the evolving rate when dynamic).
     """
     rng = np.random.default_rng(seed)
     jrm = JointReturnModel(model, block_length=block_length)
@@ -107,12 +110,23 @@ def run(amount, age, gender, state, joint_age, joint_gender,
     irm = (rate_model.InterestRateModel(initial_rate=initial_rate)
            if dynamic_rates else None)
 
+    # The per-year discount rate actually used: the fixed local rate in static
+    # mode, NaN when static site quotes (no single rate), evolving when dynamic.
+    if dynamic_rates:
+        static_rate = None
+    elif quotes == "local":
+        static_rate = interest
+    else:
+        static_rate = float("nan")
+
     ending_nominal = np.empty(sims)
     ending_real = np.empty(sims)
     payouts_real = np.empty((sims, years))
     payouts_nominal = np.empty((sims, years))
     equities = np.empty((sims, years))
     inflations = np.empty((sims, years))
+    balances_real = np.empty((sims, years))
+    interests = np.empty((sims, years))
 
     for i in range(sims):
         equity, sampled_inflation = jrm.sample_path(years, rng)
@@ -136,9 +150,11 @@ def run(amount, age, gender, state, joint_age, joint_gender,
         payouts_nominal[i] = res["payouts_nominal"]
         equities[i] = equity
         inflations[i] = sampled_inflation if dynamic_rates else inflation
+        balances_real[i] = res["balances_real"]
+        interests[i] = interest_path if interest_path is not None else static_rate
 
     return (jrm, ending_nominal, ending_real, payouts_nominal, payouts_real,
-            equities, inflations)
+            equities, inflations, balances_real, interests)
 
 
 def worst_real_returns(equities, inflations, window=5):
@@ -207,102 +223,10 @@ def _payout_table_lines(title, payouts, age):
     return lines
 
 
-def _side_by_side(left, right, gutter=4):
-    """Combine two blocks of lines into single rows, left block padded to width."""
-    width = (max((len(ln) for ln in left), default=0)) + gutter
-    rows = []
-    for i in range(max(len(left), len(right))):
-        l = left[i] if i < len(left) else ""
-        r = right[i] if i < len(right) else ""
-        rows.append(f"{l:<{width}}{r}")
-    return rows
-
-
 # --------------------------------------------------------------------------- #
-# File export (PDF / CSV). The PDF writer is self-contained (standard library
-# only) and uses the built-in Courier font, which suits the monospaced tables.
+# File export. The figure-rich PDF lives in report_pdf.py (imported lazily); the
+# CSV writer below is self-contained (standard library only).
 # --------------------------------------------------------------------------- #
-
-def _pdf_escape(text: str) -> str:
-    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-
-
-def _pdf_content_stream(lines, footer, *, x, y_start, leading, size,
-                        footer_y, footer_size):
-    parts = ["BT", f"/F1 {size} Tf", f"{leading:.2f} TL", f"{x} {y_start:.2f} Td"]
-    for ln in lines:
-        parts.append(f"({_pdf_escape(ln)}) Tj")
-        parts.append("T*")
-    parts.append("ET")
-    if footer:
-        parts += ["BT", f"/F1 {footer_size} Tf",
-                  f"{x} {footer_y:.2f} Td",
-                  f"({_pdf_escape(footer)}) Tj", "ET"]
-    return "\n".join(parts).encode("latin-1", "replace")
-
-
-def write_pdf(path, lines, footer_text, *, font_size=9, landscape=True):
-    """Render `lines` to a multi-page PDF.
-
-    `lines` are laid out in order (already including the report's top header
-    line). On every page after the first, `footer_text` plus a page counter is
-    printed in the footer.
-    """
-    page_w, page_h = (792, 612) if landscape else (612, 792)
-    margin = 36
-    leading = font_size * 1.25
-    footer_size = max(7, font_size - 2)
-    x = margin
-    y_top = page_h - margin - font_size      # first text baseline
-    footer_y = 18                            # footer baseline, below the margin
-
-    lines_per_page = int((y_top - margin) / leading) + 1
-    chunks = [lines[i:i + lines_per_page]
-              for i in range(0, len(lines), lines_per_page)] or [[]]
-    n = len(chunks)
-
-    obj = {
-        1: b"<< /Type /Catalog /Pages 2 0 R >>",
-        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
-    }
-    page_nums = []
-    next_num = 4
-    for pi, chunk in enumerate(chunks):
-        footer = (f"{footer_text}    page {pi + 1} of {n}"
-                  if pi > 0 and footer_text else None)
-        stream = _pdf_content_stream(
-            chunk, footer, x=x, y_start=y_top, leading=leading, size=font_size,
-            footer_y=footer_y, footer_size=footer_size,
-        )
-        content_num, page_num = next_num, next_num + 1
-        next_num += 2
-        obj[content_num] = (f"<< /Length {len(stream)} >>\nstream\n"
-                            .encode("latin-1") + stream + b"\nendstream")
-        obj[page_num] = (
-            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_w} {page_h}] "
-            f"/Resources << /Font << /F1 3 0 R >> >> "
-            f"/Contents {content_num} 0 R >>").encode("latin-1")
-        page_nums.append(page_num)
-
-    kids = " ".join(f"{p} 0 R" for p in page_nums)
-    obj[2] = f"<< /Type /Pages /Kids [{kids}] /Count {n} >>".encode("latin-1")
-
-    max_num = next_num - 1
-    out = bytearray(b"%PDF-1.4\n")
-    offsets = {}
-    for num in range(1, max_num + 1):
-        offsets[num] = len(out)
-        out += f"{num} 0 obj\n".encode("latin-1") + obj[num] + b"\nendobj\n"
-    xref_pos = len(out)
-    out += f"xref\n0 {max_num + 1}\n".encode("latin-1")
-    out += b"0000000000 65535 f \n"
-    for num in range(1, max_num + 1):
-        out += f"{offsets[num]:010d} 00000 n \n".encode("latin-1")
-    out += b"trailer\n" + f"<< /Size {max_num + 1} /Root 1 0 R >>\n".encode("latin-1")
-    out += f"startxref\n{xref_pos}\n".encode("latin-1") + b"%%EOF\n"
-    with open(path, "wb") as f:
-        f.write(out)
-
 
 def _summary_row(label, s):
     row = [label, round(s["mean"]), round(s["median"])]
@@ -337,21 +261,24 @@ def write_csv(path, *, header_line, params_line, end_real, end_nom,
             w.writerow([t + 1, age + t] + stats[1:])
 
 
-def _prompt_and_export(pdf_body, footer_text, csv_kwargs):
-    """Interactively offer to save the report to a PDF or CSV file."""
+def _prompt_and_export(csv_kwargs, report_data):
+    """Interactively offer to save the consolidated PDF report or a CSV."""
     if not sys.stdin.isatty():
         return
     while True:
         try:
-            choice = input("\nSave output to a file? [PDF / csv / exit]: ").strip().lower()
+            choice = input(
+                "\nSave output to a file? [PDF / csv / exit]: "
+            ).strip().lower()
         except EOFError:
             return
         if choice in ("", "exit", "quit", "q", "e"):
             return
         if choice == "pdf":
+            import report_pdf
             path = (input("PDF filename [montecarlo_report.pdf]: ").strip()
                     or "montecarlo_report.pdf")
-            write_pdf(path, pdf_body, footer_text)
+            report_pdf.write_report_pdf(path, report_data)
             print(f"wrote {path}")
         elif choice == "csv":
             path = (input("CSV filename [montecarlo_report.csv]: ").strip()
@@ -370,16 +297,17 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
                  dynamic_rates=False, initial_rate=rate_model.DEFAULT_INITIAL_RATE):
     """Run the simulation and assemble the report in every output form.
 
-    Returns (report_text, pdf_body, footer_text, csv_kwargs):
-      report_text -- the stacked-block text report (what main() prints),
-      pdf_body    -- list of lines for write_pdf (blocks side by side),
-      footer_text -- the "user    timestamp" header/footer line,
-      csv_kwargs  -- kwargs ready to splat into write_csv.
+    Returns (report_text, csv_kwargs, report_data):
+      report_text -- the stacked-block text report (shown on screen / printed),
+      csv_kwargs  -- kwargs ready to splat into write_csv,
+      report_data -- dict of raw per-path arrays + labels for the consolidated
+                     PDF report (report_pdf.write_report_pdf).
     Raises annuity_quote.QuoteError / urllib.error.URLError (site quotes) or
     FileNotFoundError (--improvement without the G2 tables) on pricing failure.
     """
     t0 = time.time()
-    jrm, end_nom, end_real, pay_nom, pay_real, equities, inflations = run(
+    (jrm, end_nom, end_real, pay_nom, pay_real, equities, inflations,
+     balances_real, interests) = run(
         amount=amount, age=age, gender=gender, state=state,
         joint_age=joint_age, joint_gender=joint_gender,
         sims=sims, years=years, model=model,
@@ -447,19 +375,27 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     user = getpass.getuser()
     stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     footer_text = f"{user}    {stamp}"
-    pdf_body = (
-        [footer_text, "", *model_summary.split("\n"), "", params_line, ""]
-        + _side_by_side(real_block, nom_block)
-        + ["", downside, ""]
-        + payout_lines
-    )
     csv_kwargs = dict(
         header_line=footer_text, params_line=params_line,
         end_real=end_real, end_nom=end_nom,
         worst_1yr=worst_1yr, worst_5yr=worst_5yr,
         payout_title=payout_title, payout=payout, age=age,
     )
-    return report_text, pdf_body, footer_text, csv_kwargs
+    report_data = dict(
+        title="Annuity-equivalent Monte Carlo report",
+        footer_text=footer_text, params_line=params_line,
+        model_summary=model_summary,
+        amount=amount, age=age, gender=gender,
+        joint_age=joint_age, joint_gender=joint_gender,
+        years=years, sims=sims,
+        dynamic_rates=dynamic_rates, quotes=quotes,
+        end_real=end_real, end_nom=end_nom,
+        balances_real=balances_real, payouts_real=pay_real,
+        equities=equities, inflations=inflations, interests=interests,
+        worst_1yr=worst_1yr, worst_5yr=worst_5yr,
+        downside=downside,
+    )
+    return report_text, csv_kwargs, report_data
 
 
 def main(argv=None) -> int:
@@ -531,7 +467,7 @@ def main(argv=None) -> int:
         p.error("--lower-bound must not exceed --upper-bound")
 
     try:
-        report_text, pdf_body, footer_text, csv_kwargs = build_report(
+        report_text, csv_kwargs, report_data = build_report(
             amount=args.amount, age=args.age, gender=args.gender, state=args.state,
             joint_age=args.joint_age, joint_gender=args.joint_gender,
             sims=args.sims, years=args.years, model=args.model,
@@ -548,7 +484,7 @@ def main(argv=None) -> int:
         return 1
 
     print(report_text)
-    _prompt_and_export(pdf_body, footer_text, csv_kwargs)
+    _prompt_and_export(csv_kwargs, report_data)
     return 0
 
 

@@ -4,6 +4,11 @@
 # numpy>=2,<3
 numpy==2.4.4
 
+# Graphical report only (report_pdf.py): the "Graphical Report" button / "report"
+# export choice. The simulations and the text/CSV exports run without it; comment
+# out this line if you never generate the graphical PDF report.
+matplotlib==3.11.0
+
 # Docs only: used to regenerate README.html from README.md (not needed to run the
 # simulation tools). Comment out this line if you don't rebuild the docs.
 markdown==3.10.2
