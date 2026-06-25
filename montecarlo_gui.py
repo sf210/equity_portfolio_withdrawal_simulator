@@ -38,6 +38,12 @@ def _optional(text):
     return text or None
 
 
+def _float_or_zero(widget):
+    """Read a numeric entry, treating a blank field as 0."""
+    text = widget.get().strip()
+    return float(text) if text else 0.0
+
+
 class MonteCarloGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -104,21 +110,21 @@ class MonteCarloGUI:
         self.joint_gender = combo(5, 0, ["", "M", "F"], "")
         row(5, 2, "Lower bound"); self.lower_bound = entry(5, 2, "")
 
-        row(6, 0, "Seed"); self.seed = entry(6, 0, "")
+        row(6, 0, "Seed"); self.seed = entry(6, 0, "42")
         row(6, 2, "Inflation")
         self.inflation = entry(6, 2, str(mc.wp.DEFAULT_INFLATION))
 
         row(7, 0, "Quotes")
         self.quotes = combo(7, 0, ["local", "site"], mc.wp.DEFAULT_QUOTES)
-        row(7, 2, "Interest")
-        self.interest = entry(7, 2, str(mc.annuity_pricing.DEFAULT_INTEREST))
+        # One rate field: the fixed discount rate when static, or the starting
+        # rate when dynamic (the model evolves it from there). A blank reads as 0.
+        row(7, 2, "Interest rate")
+        self.interest = entry(7, 2, str(mc.rate_model.DEFAULT_INITIAL_RATE))
 
         self.dynamic = tk.BooleanVar(value=False)
         ttk.Checkbutton(frm, text="Dynamic inflation + rate (local only)",
                         variable=self.dynamic).grid(
-            row=8, column=0, columnspan=2, sticky="w", pady=2)
-        row(8, 2, "Initial rate")
-        self.initial_rate = entry(8, 2, str(mc.rate_model.DEFAULT_INITIAL_RATE))
+            row=8, column=0, columnspan=3, sticky="w", pady=2)
 
         self.improvement = tk.BooleanVar(value=False)
         ttk.Checkbutton(frm, text="Scale G2 mortality improvement (local only)",
@@ -197,17 +203,18 @@ class MonteCarloGUI:
             raise ValueError("Years must be at least 1.")
         block_length = int(self.block_length.get())
 
-        inflation = float(self.inflation.get())
+        inflation = _float_or_zero(self.inflation)
         if inflation <= -1:
             raise ValueError("Inflation must be greater than -1 (i.e. > -100%).")
 
         quotes = self.quotes.get()
-        interest = float(self.interest.get())
+        # One field serves as both the fixed discount rate (static) and the
+        # dynamic starting rate; a blank reads as 0.
+        interest = _float_or_zero(self.interest)
         if interest <= -1:
-            raise ValueError("Interest must be greater than -1 (i.e. > -100%).")
+            raise ValueError("Interest rate must be greater than -1 (i.e. > -100%).")
         improvement = bool(self.improvement.get())
         dynamic = bool(self.dynamic.get())
-        initial_rate = float(self.initial_rate.get())
         if dynamic and quotes != "local":
             raise ValueError("Dynamic rates require the local quotes source.")
 
@@ -234,7 +241,7 @@ class MonteCarloGUI:
             block_length=block_length, seed=seed,
             inflation=inflation, upper_bound=upper, lower_bound=lower,
             quotes=quotes, interest=interest, improvement=improvement,
-            dynamic_rates=dynamic, initial_rate=initial_rate,
+            dynamic_rates=dynamic, initial_rate=interest,
         )
 
     # ----- actions -----------------------------------------------------------

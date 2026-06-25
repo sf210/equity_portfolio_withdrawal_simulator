@@ -281,10 +281,12 @@ simulation without the command line.
 
 ![The Monte Carlo GUI](mc_gui.png)
 
-The top **Inputs** panel collects exactly the same parameters as the command
-line, including **Inflation**, the **Quotes** source (local/site), **Interest**, a
-**Dynamic inflation + rate** checkbox with its **Initial rate**, and a **Scale G2
-mortality improvement** checkbox. Fields with a fixed set of
+The top **Inputs** panel collects the same parameters as the command line,
+including **Inflation**, the **Quotes** source (local/site), a single **Interest
+rate** (the fixed discount rate when static, or the starting rate when dynamic), a
+**Dynamic inflation + rate** checkbox, and a **Scale G2 mortality improvement**
+checkbox. The numeric **Inflation** and **Interest rate** fields read a blank
+entry as **0**. Fields with a fixed set of
 choices — **Gender**, **State**, **Model**, **Joint gender**, and **Quotes** — are
 drop-downs; the rest are text entries, and blank optional fields (joint
 age/gender, upper/lower bound, seed) are simply omitted. The whole form is
