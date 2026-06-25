@@ -50,6 +50,7 @@ import numpy as np
 
 import annuity_pricing
 import annuity_quote
+import rate_model
 import withdrawal_projection as wp
 from equity_model import JointReturnModel
 
@@ -78,17 +79,21 @@ def run(amount, age, gender, state, joint_age, joint_gender,
         sims, years, model, block_length, seed,
         inflation=wp.DEFAULT_INFLATION, upper_bound=None, lower_bound=None,
         quotes=wp.DEFAULT_QUOTES, interest=annuity_pricing.DEFAULT_INTEREST,
-        improvement=False, quote_year=None):
+        improvement=False, quote_year=None,
+        dynamic_rates=False, initial_rate=rate_model.DEFAULT_INITIAL_RATE):
     """Run `sims` paths.
 
-    inflation is a constant annual decimal fraction applied to every year of
-    every path (used to deflate results to today's dollars). quotes / interest /
-    improvement / quote_year select and parameterise the annuity pricing source
-    (see withdrawal_projection.build_rate_cache).
+    In the default (constant) mode, inflation is a constant decimal fraction used
+    to deflate results to today's dollars, and the annuity discount rate is fixed
+    (interest / quotes / improvement / quote_year select the pricing source).
+
+    With dynamic_rates=True, each path uses its own per-year sampled inflation
+    (no restatement of equity) and an annuity discount rate that evolves with it
+    via rate_model.InterestRateModel, starting from initial_rate (local pricing).
 
     Returns (jrm, ending_nominal, ending_real, payouts_nominal, payouts_real,
-    equities, inflations). The payout and per-year return arrays have shape
-    (sims, years); inflations is filled with the constant inflation rate.
+    equities, inflations) with the payout/return arrays shaped (sims, years);
+    inflations holds the per-year inflation actually used to deflate each path.
     """
     rng = np.random.default_rng(seed)
     jrm = JointReturnModel(model, block_length=block_length)
@@ -99,28 +104,38 @@ def run(amount, age, gender, state, joint_age, joint_gender,
         source=quotes, interest_rate=interest, improvement=improvement,
         quote_year=quote_year,
     )
+    irm = (rate_model.InterestRateModel(initial_rate=initial_rate)
+           if dynamic_rates else None)
 
     ending_nominal = np.empty(sims)
     ending_real = np.empty(sims)
     payouts_real = np.empty((sims, years))
     payouts_nominal = np.empty((sims, years))
     equities = np.empty((sims, years))
-    inflations = np.full((sims, years), inflation)
+    inflations = np.empty((sims, years))
 
     for i in range(sims):
-        equity, hist_inflation = jrm.sample_path(years, rng)
-        equity = wp.restate_equity_at_inflation(equity, hist_inflation, inflation)
+        equity, sampled_inflation = jrm.sample_path(years, rng)
+        if dynamic_rates:
+            path_inflation = sampled_inflation
+            interest_path = irm.sample_path(sampled_inflation, rng)
+        else:
+            equity = wp.restate_equity_at_inflation(equity, sampled_inflation, inflation)
+            path_inflation = inflation
+            interest_path = None
         res = wp.simulate_path(
             amount=amount, age=age, gender=gender, state=state,
-            equity_returns=equity, inflation=inflation,
+            equity_returns=equity, inflation=path_inflation,
             rate_cache=rate_cache, joint_age=joint_age, collect_rows=False,
             upper_bound=upper_bound, lower_bound=lower_bound,
+            interest_path=interest_path,
         )
         ending_nominal[i] = res["ending_balance"]
         ending_real[i] = res["ending_balance_real"]
         payouts_real[i] = res["payouts_real"]
         payouts_nominal[i] = res["payouts_nominal"]
         equities[i] = equity
+        inflations[i] = sampled_inflation if dynamic_rates else inflation
 
     return (jrm, ending_nominal, ending_real, payouts_nominal, payouts_real,
             equities, inflations)
@@ -351,7 +366,8 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
                  sims, years, model, block_length, seed,
                  inflation=wp.DEFAULT_INFLATION, upper_bound=None, lower_bound=None,
                  quotes=wp.DEFAULT_QUOTES, interest=annuity_pricing.DEFAULT_INTEREST,
-                 improvement=False, quote_year=None):
+                 improvement=False, quote_year=None,
+                 dynamic_rates=False, initial_rate=rate_model.DEFAULT_INITIAL_RATE):
     """Run the simulation and assemble the report in every output form.
 
     Returns (report_text, pdf_body, footer_text, csv_kwargs):
@@ -370,7 +386,8 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
         block_length=block_length, seed=seed,
         inflation=inflation, upper_bound=upper_bound, lower_bound=lower_bound,
         quotes=quotes, interest=interest, improvement=improvement,
-        quote_year=quote_year,
+        quote_year=quote_year, dynamic_rates=dynamic_rates,
+        initial_rate=initial_rate,
     )
     elapsed = time.time() - t0
 
@@ -383,16 +400,22 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     if lower_bound is not None:
         bounds_bits.append(f"lower {lower_bound:g}x")
     bounds_note = f", bounds {'/'.join(bounds_bits)}" if bounds_bits else ""
-    if quotes == "site":
+    if dynamic_rates:
+        infl_note = ", inflation dynamic"
+        pricing_note = (f", local dynamic rate (i0 {initial_rate:.1%})"
+                        + (" +G2" if improvement else ""))
+    elif quotes == "site":
+        infl_note = f", inflation {inflation:.1%}"
         pricing_note = f", site quotes ({state})"
     else:
+        infl_note = f", inflation {inflation:.1%}"
         pricing_note = (f", local @ {interest:.1%}"
                         + (" +G2" if improvement else ""))
     params_line = (
         f"{sims:,} simulations x {years} years  "
         f"(amount ${amount:,}, age {age} {gender}"
         + (f", joint {joint_age} {joint_gender}" if joint_age else "")
-        + f", inflation {inflation:.1%}"
+        + infl_note
         + pricing_note
         + bounds_note
         + f")   [{elapsed:.1f}s]")
@@ -475,6 +498,13 @@ def main(argv=None) -> int:
                    help="apply Scale G2 mortality improvement (--quotes local only)")
     p.add_argument("--quote-year", type=int, default=None,
                    help="year to project mortality to for --improvement (default: current)")
+    p.add_argument("--dynamic-rates", action="store_true",
+                   help="dynamic mode: per-year sampled inflation drives both the "
+                        "deflator and an evolving annuity discount rate "
+                        "(local pricing only; ignores --inflation and --interest)")
+    p.add_argument("--initial-rate", type=float, default=rate_model.DEFAULT_INITIAL_RATE,
+                   help="starting 10-year rate for --dynamic-rates "
+                        f"(default {rate_model.DEFAULT_INITIAL_RATE})")
     p.add_argument("--upper-bound", type=float, default=None,
                    help="cap annual withdrawal at this factor of year-1's "
                         "withdrawal, in today's dollars (e.g. 1.2)")
@@ -490,6 +520,8 @@ def main(argv=None) -> int:
         p.error("--sims must be at least 2")
     if args.inflation <= -1:
         p.error("--inflation must be greater than -1 (i.e. > -100%)")
+    if args.dynamic_rates and args.quotes != "local":
+        p.error("--dynamic-rates requires --quotes local")
     if args.upper_bound is not None and args.upper_bound <= 0:
         p.error("--upper-bound must be positive")
     if args.lower_bound is not None and args.lower_bound < 0:
@@ -508,6 +540,7 @@ def main(argv=None) -> int:
             upper_bound=args.upper_bound, lower_bound=args.lower_bound,
             quotes=args.quotes, interest=args.interest,
             improvement=args.improvement, quote_year=args.quote_year,
+            dynamic_rates=args.dynamic_rates, initial_rate=args.initial_rate,
         )
     except (annuity_quote.QuoteError, urllib.error.URLError,
             FileNotFoundError) as exc:

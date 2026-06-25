@@ -13,6 +13,10 @@ Sources (fetched 2026-06):
   https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/histretSP.html
 - CPI-U annual-average inflation: usinflationcalculator.com
   https://www.usinflationcalculator.com/inflation/historical-inflation-rates/
+- 10-year Treasury constant-maturity yield (annual average of monthly GS10):
+  Federal Reserve / FRED, series GS10, https://fred.stlouisfed.org/series/GS10
+  (used only to fit the dynamic interest-rate model in rate_model.py; the GS10
+  series begins in 1953, so it is shorter than the equity/CPI series.)
 
 Values are percentages. Use the helpers below to get decimal fractions.
 """
@@ -58,6 +62,25 @@ ANNUAL_PCT: dict[int, tuple[float, float]] = {
 
 YEARS: list[int] = sorted(ANNUAL_PCT)
 
+# year -> 10-year Treasury constant-maturity yield (annual average of monthly
+# GS10), in percent. Starts 1953 (GS10's first year); used by rate_model.py to
+# fit the dynamic interest-rate process, not by the equity/inflation bootstrap.
+TREASURY_10Y_PCT: dict[int, float] = {
+    1953: 2.85, 1954: 2.40, 1955: 2.82, 1956: 3.18, 1957: 3.65, 1958: 3.32,
+    1959: 4.33, 1960: 4.12, 1961: 3.88, 1962: 3.95, 1963: 4.00, 1964: 4.19,
+    1965: 4.28, 1966: 4.92, 1967: 5.07, 1968: 5.65, 1969: 6.67, 1970: 7.35,
+    1971: 6.16, 1972: 6.21, 1973: 6.84, 1974: 7.56, 1975: 7.99, 1976: 7.61,
+    1977: 7.42, 1978: 8.41, 1979: 9.44, 1980: 11.46, 1981: 13.91, 1982: 13.00,
+    1983: 11.10, 1984: 12.44, 1985: 10.62, 1986: 7.68, 1987: 8.38, 1988: 8.85,
+    1989: 8.50, 1990: 8.55, 1991: 7.86, 1992: 7.01, 1993: 5.87, 1994: 7.08,
+    1995: 6.58, 1996: 6.44, 1997: 6.35, 1998: 5.26, 1999: 5.64, 2000: 6.03,
+    2001: 5.02, 2002: 4.61, 2003: 4.01, 2004: 4.27, 2005: 4.29, 2006: 4.79,
+    2007: 4.63, 2008: 3.67, 2009: 3.26, 2010: 3.21, 2011: 2.79, 2012: 1.80,
+    2013: 2.35, 2014: 2.54, 2015: 2.14, 2016: 1.84, 2017: 2.33, 2018: 2.91,
+    2019: 2.14, 2020: 0.89, 2021: 1.44, 2022: 2.95, 2023: 3.96, 2024: 4.21,
+    2025: 4.29,
+}
+
 
 def equity_returns() -> list[float]:
     """Nominal S&P 500 total returns as decimal fractions, in year order."""
@@ -67,3 +90,20 @@ def equity_returns() -> list[float]:
 def inflation_rates() -> list[float]:
     """CPI annual-average inflation as decimal fractions, in year order."""
     return [ANNUAL_PCT[y][1] / 100.0 for y in YEARS]
+
+
+def treasury_10y_regression_data():
+    """Aligned columns for fitting the lagged interest-rate model.
+
+    Returns (years, i_t, i_lag, pi_lag): the 10-year yield, its prior-year value,
+    and prior-year CPI inflation, over every year where all three are available
+    (1954-2025). Yields and inflation are decimal fractions.
+    """
+    yld = {y: v / 100.0 for y, v in TREASURY_10Y_PCT.items()}
+    cpi = {y: ANNUAL_PCT[y][1] / 100.0 for y in ANNUAL_PCT}
+    years = [y for y in sorted(yld)
+             if (y - 1) in yld and (y - 1) in cpi and y in cpi]
+    return (years,
+            [yld[y] for y in years],
+            [yld[y - 1] for y in years],
+            [cpi[y - 1] for y in years])
