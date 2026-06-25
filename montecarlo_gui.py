@@ -327,6 +327,15 @@ class MonteCarloGUI:
         self.export_csv.configure(state="normal")
         self.status.configure(text="Done.")
 
+    def _announce_saved(self, path):
+        """Report the save and open the file in its OS default application."""
+        try:
+            _open_file(pathlib.Path(path))
+        except OSError as exc:
+            self.status.configure(text=f"Wrote {path} (could not open: {exc})")
+            return
+        self.status.configure(text=f"Wrote {path} (opened)")
+
     def on_open_doc(self, filename):
         path = _HERE / filename
         if not path.exists():
@@ -357,7 +366,7 @@ class MonteCarloGUI:
             messagebox.showerror("Export failed", str(exc))
             self.status.configure(text="Error.")
             return
-        self.status.configure(text=f"Wrote {path}")
+        self._announce_saved(path)
 
     def on_export_csv(self):
         if self._last_csv_kwargs is None:
@@ -373,7 +382,7 @@ class MonteCarloGUI:
         except OSError as exc:
             messagebox.showerror("Export failed", str(exc))
             return
-        self.status.configure(text=f"Wrote {path}")
+        self._announce_saved(path)
 
 
 def main():
