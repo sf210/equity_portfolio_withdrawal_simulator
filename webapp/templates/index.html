@@ -1,0 +1,163 @@
+<!doctype html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+     License, v. 2.0. If a copy of the MPL was not distributed with this
+     file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Annuity-equivalent Monte Carlo</title>
+  <style>
+    :root { --fg:#1b2430; --muted:#5d6b7a; --accent:#1b5e20; --line:#d7dde3; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+           color: var(--fg); margin: 0; background: #f4f6f8; }
+    header { background: var(--accent); color: #fff; padding: 14px 20px; }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; font-size: 12.5px; opacity: .9; }
+    main { max-width: 1000px; margin: 18px auto; padding: 0 16px; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 8px;
+            padding: 16px; margin-bottom: 16px; }
+    fieldset { border: none; padding: 0; margin: 0; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; }
+    @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+    input, select { width: 100%; padding: 6px 8px; font-size: 13px;
+                    border: 1px solid var(--line); border-radius: 5px; background:#fff; }
+    .checks { display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap; }
+    .checks label { display: flex; align-items: center; gap: 6px; font-size: 13px;
+                    color: var(--fg); margin: 0; }
+    .checks input { width: auto; }
+    .actions { margin-top: 14px; display: flex; gap: 10px; align-items: center;
+               flex-wrap: wrap; }
+    button { font-size: 13px; padding: 8px 16px; border-radius: 6px; cursor: pointer;
+             border: 1px solid transparent; }
+    button.primary { background: var(--accent); color: #fff; }
+    button.secondary { background: #fff; color: var(--fg); border-color: var(--line); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .error { background: #fdecea; border: 1px solid #f5c6c2; color: #8a2018;
+             padding: 10px 12px; border-radius: 6px; font-size: 13px; }
+    .report { white-space: pre; overflow-x: auto; font-family: ui-monospace,
+              "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px;
+              line-height: 1.35; background: #fbfcfd; border: 1px solid var(--line);
+              border-radius: 6px; padding: 12px; }
+    .hint { font-size: 11.5px; color: var(--muted); }
+    footer { max-width: 1000px; margin: 0 auto 28px; padding: 0 16px;
+             font-size: 11.5px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Annuity-equivalent Monte Carlo</h1>
+    <p>Simulate equity-portfolio withdrawals against an annuity-equivalent income.
+       Local SOA-mortality pricing. Up to {{ "{:,}".format(max_sims) }} simulations,
+       {{ max_years }} years.</p>
+  </header>
+
+  <main>
+    {% if error %}
+      <div class="card error">{{ error }}</div>
+    {% endif %}
+
+    <form class="card" method="post" action="/run" id="form">
+      <fieldset>
+        <div class="grid">
+          <div><label>Amount ($)</label>
+            <input name="amount" value="{{ values.get('amount','') }}"></div>
+          <div><label>Simulations</label>
+            <input name="sims" value="{{ values.get('sims','') }}"></div>
+          <div><label>Age</label>
+            <input name="age" value="{{ values.get('age','') }}"></div>
+          <div><label>Years</label>
+            <input name="years" value="{{ values.get('years','') }}"></div>
+
+          <div><label>Gender</label>
+            <select name="gender">
+              {% for g in genders %}
+              <option value="{{ g }}" {{ 'selected' if values.get('gender')==g }}>{{ g }}</option>
+              {% endfor %}
+            </select></div>
+          <div><label>Return model</label>
+            <select name="model">
+              {% for m in models %}
+              <option value="{{ m }}" {{ 'selected' if values.get('model')==m }}>{{ m }}</option>
+              {% endfor %}
+            </select></div>
+          <div><label>State</label>
+            <select name="state">
+              {% for s in states %}
+              <option value="{{ s }}" {{ 'selected' if values.get('state')==s }}>{{ s }}</option>
+              {% endfor %}
+            </select></div>
+          <div><label>Block length (yrs)</label>
+            <input name="block_length" value="{{ values.get('block_length','') }}"></div>
+
+          <div><label>Joint age <span class="hint">(opt.)</span></label>
+            <input name="joint_age" value="{{ values.get('joint_age','') }}"></div>
+          <div><label>Joint gender <span class="hint">(opt.)</span></label>
+            <select name="joint_gender">
+              <option value="" {{ 'selected' if not values.get('joint_gender') }}>&mdash;</option>
+              {% for g in genders %}
+              <option value="{{ g }}" {{ 'selected' if values.get('joint_gender')==g }}>{{ g }}</option>
+              {% endfor %}
+            </select></div>
+          <div><label>Upper bound <span class="hint">(x, opt.)</span></label>
+            <input name="upper_bound" value="{{ values.get('upper_bound','') }}"></div>
+          <div><label>Lower bound <span class="hint">(x, opt.)</span></label>
+            <input name="lower_bound" value="{{ values.get('lower_bound','') }}"></div>
+
+          <div><label>Seed <span class="hint">(blank = random)</span></label>
+            <input name="seed" value="{{ values.get('seed','') }}"></div>
+          <div><label>Inflation <span class="hint">(e.g. 0.025)</span></label>
+            <input name="inflation" value="{{ values.get('inflation','') }}"></div>
+          <div><label>Interest rate <span class="hint">(e.g. 0.043)</span></label>
+            <input name="interest" value="{{ values.get('interest','') }}"></div>
+          <div></div>
+        </div>
+
+        <div class="checks">
+          <label><input type="checkbox" name="dynamic" value="on"
+            {{ 'checked' if values.get('dynamic') }}> Dynamic inflation + rate</label>
+          <label><input type="checkbox" name="improvement" value="on"
+            {{ 'checked' if values.get('improvement') }}> Scale G2 mortality improvement</label>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="primary" id="runbtn">Run simulation</button>
+          <span class="hint" id="running" style="display:none;">Running&hellip;</span>
+        </div>
+      </fieldset>
+    </form>
+
+    {% if report %}
+    <div class="card">
+      <div class="actions" style="margin-top:0;margin-bottom:12px;">
+        <form method="post" action="/export.pdf">
+          {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+          <button type="submit" class="secondary">Download PDF report</button>
+        </form>
+        <form method="post" action="/export.csv">
+          {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+          <button type="submit" class="secondary">Download CSV</button>
+        </form>
+      </div>
+      <div class="report">{{ report }}</div>
+    </div>
+    {% endif %}
+  </main>
+
+  <footer>
+    Educational projection only &mdash; not financial advice. Results depend on the
+    assumptions you enter and the historical return model selected.
+  </footer>
+
+  <script>
+    // Give immediate feedback while the (synchronous) simulation runs.
+    var form = document.getElementById('form');
+    if (form) form.addEventListener('submit', function () {
+      document.getElementById('runbtn').disabled = true;
+      document.getElementById('running').style.display = 'inline';
+    });
+  </script>
+</body>
+</html>

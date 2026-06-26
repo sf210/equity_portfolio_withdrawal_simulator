@@ -1,0 +1,41 @@
+# systemd unit for the Monte Carlo web app (gunicorn behind nginx).
+# Install:  sudo cp webapp/deploy/montecarlo-web.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now montecarlo-web
+#
+# Assumes the repo is checked out at /opt/montecarlo with a virtualenv at
+# /opt/montecarlo/.venv (see webapp/DEPLOY.md). Adjust paths/User as needed.
+
+[Unit]
+Description=Annuity-equivalent Monte Carlo web app (gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=montecarlo
+Group=montecarlo
+WorkingDirectory=/opt/montecarlo
+Environment=PATH=/opt/montecarlo/.venv/bin
+# Tunables (see webapp/app.py and webapp/gunicorn_conf.py):
+Environment=MC_BIND=127.0.0.1:8000
+Environment=MC_WORKERS=2
+Environment=MC_MAX_SIMS=20000
+Environment=MC_MAX_YEARS=60
+Environment=MC_MAX_CONCURRENT=2
+Environment=MC_RATE_LIMITS=60 per hour;10 per minute
+# Keep matplotlib's font cache in a writable, persistent dir.
+Environment=MPLCONFIGDIR=/opt/montecarlo/.cache/matplotlib
+ExecStart=/opt/montecarlo/.venv/bin/gunicorn -c webapp/gunicorn_conf.py webapp.app:app
+Restart=on-failure
+RestartSec=3
+
+# --- hardening ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/montecarlo/.cache
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target
