@@ -46,7 +46,6 @@ desktop GUI. matplotlib renders headlessly (the `Agg` backend).
 cd /opt
 git clone https://github.com/sf210/equity_portfolio_withdrawal_simulator.git montecarlo
 cd montecarlo
-git checkout web-app          # until this branch is merged to master
 chown -R montecarlo:montecarlo /opt/montecarlo
 ```
 
