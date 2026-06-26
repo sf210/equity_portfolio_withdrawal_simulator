@@ -1,25 +1,12 @@
 # Equity Portfolio Withdrawal Simulator
 
-Tools for projecting retirement withdrawals under a strategy that keeps the money
-invested in equities and each year withdraws what a **life annuity would pay** on
-the current balance — then stress-tests that strategy with Monte Carlo simulation.
-
-Annuity payouts are priced by default from a **local, offline model** built on the
-SOA 2012 IAM mortality tables; live quotes from
-[immediateannuities.com](https://www.immediateannuities.com/) are available as an
-opt-in alternative (`--quotes site`). Equity-return scenarios are driven by
-historical S&P 500 data (1928–2025); inflation is a constant assumption
-(default 2.5%) used to express results in today's dollars — or, with
-`--dynamic-rates`, it varies year to year and **drives an evolving annuity
-discount rate** fit to historical Treasury yields (see `METHODOLOGY.pdf`).
-
 ## Disclaimer
 
-**These programs are for educational purposes only and must not be taken as
-financial advice.** Appropriate investment advice varies between individuals and
-the analysis performed by the programs in this repository **do not** contemplate
-any such individual circumstances. Equity investment can lose money. The
-projected cashflows from the investment strategies modeled here are
+**These programs are for educational purposes only and are not financial
+advice.** Appropriate investment advice depends on individual circumstances and
+risk tolerance. The analyses performed by the programs in this repository **do
+not** contemplate any such individual circumstances. Equity investment can lose
+money. The projected cashflows from the investment strategies modeled here are
 **speculative** and are likely to differ **significantly** from actual
 experience going forward.
 
@@ -27,340 +14,359 @@ The scripts in this repository likely contain errors. There is **ABSOLUTELY NO
 WARRANTY** for the software in this repository; see the [License](#license) for
 the full warranty disclaimer and limitation of liability.
 
-Additional modeling caveats: this models withdrawing the annuity-*equivalent*
-amount while staying invested — it is **not** an annuity purchase, so there is no
-mortality pooling and no income guarantee. Because the annuity payout includes
-return of principal, the withdrawal rate is high and the real balance typically
-erodes over time. The default local annuity pricing is a simplified actuarial
-calculation (SOA 2012 IAM mortality at a flat interest rate, no insurer expense or
-profit load) and is not a marketed rate; the optional site quotes are "average
-estimated" figures, not binding offers.
+---
 
-## Setup
+## What this tool does
 
-Requires **Python 3.14**. The default local annuity pricing runs fully offline;
-network access is only needed for the opt-in live quotes (`--quotes site`) and the
-`annuity_pricing.py --compare` benchmark. The only third-party dependency needed
-to run the simulations is **NumPy**; **matplotlib** is an optional dependency
-needed only for the graphical PDF report, and the **markdown** package is an
-optional docs-only dependency, used solely to regenerate `README.html` from
-`README.md`. The Tk GUI uses `tkinter` from the standard library.
+This simulator models a retirement spending strategy that keeps money **invested
+in equities** and each year withdraws roughly what a **life annuity would pay**
+on the current balance. The Monte Carlo engine runs thousands of independent
+scenarios, each drawing random sequences of historical equity returns and
+inflation, and reports the resulting distribution of balances and annual
+withdrawals year-by-year.
+
+### Where this strategy fits in a retirement plan
+
+This tool works best when the equity portfolio is **one component of a broader
+retirement income strategy** — not the sole source of income. The strategy is
+designed for people whose essential spending is already covered by reliable,
+inflation-adjusted sources such as Social Security, pensions, or a TIPS ladder.
+Because necessities are funded elsewhere, the amount withdrawn from the equity
+portfolio can be allowed to **vary substantially from year to year** without
+endangering the retiree's standard of living. In a bad year for stocks, the
+portfolio simply pays less; in a good year, it pays more.
+
+The simulation shows the **range of potential outcomes** — how much the annual
+payout might vary, and how the balance might evolve — under thousands of
+different historical-return sequences. This can inform questions such as:
+
+- Is my starting withdrawal rate aggressive or conservative?
+- How likely is the balance to grow, stay flat, or erode over time?
+- How bad can a run of poor returns get, and for how long?
+- What does the range of year-by-year income look like in today's dollars?
+
+> **Note:** This is *not* a model of buying an annuity. The money stays
+> invested, so there is no mortality pooling and no income guarantee. A severe
+> early sequence of poor returns can deplete the balance. The annuity payout is
+> used only as a spending rule — a longevity-aware way to decide how much to
+> take each year.
+
+---
+
+## Installing the GUI
+
+The installer sets up a Python virtual environment and creates a desktop
+shortcut that launches the graphical application with no command-line
+involvement. Run it once from the project folder you downloaded.
+
+### macOS
+
+Double-click **`installers/install_macos.command`** in Finder (or run it from
+Terminal). This creates **`~/Applications/Annuity Monte Carlo.app`**. After
+installation, launch the app from your Applications folder. If Gatekeeper
+blocks it on first launch, right-click the app and choose **Open**.
+
+To uninstall, double-click **`installers/uninstall_macos.command`**.
+
+### Windows
+
+Double-click **`installers/install_windows.bat`**. It creates Start Menu and
+Desktop shortcuts that launch the GUI without opening a console window. If
+Python is not already installed, the installer downloads and installs the
+official Python 3.14 package automatically.
+
+To uninstall, run:
+```
+powershell -ExecutionPolicy Bypass -File installers\uninstall_windows.ps1
+```
+
+### Linux
+
+From a terminal in the project folder, run:
 
 ```bash
-git clone git@github.com:sf210/equity_portfolio_withdrawal_simulator.git
-cd equity_portfolio_withdrawal_simulator
-
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+installers/install_linux.sh
 ```
 
-The virtual environment is intentionally **not** committed (it is large and
-platform-specific); recreate it from `requirements.txt` as above. `.venv/` is
-gitignored.
+This adds an **"Annuity Monte Carlo"** entry to your desktop applications menu
+and places a shortcut on your Desktop. If Python is not already installed, the
+script will use your package manager (`apt`, `dnf`, `zypper`, or `pacman`) and
+prompt for your password. To uninstall, run `installers/uninstall_linux.sh`.
 
-## How it fits together
+### What the installer does
 
-Data flows one direction, from annuity pricing + historical data into a projection:
+1. Checks for Python 3.12 or newer with Tk support; offers to install Python
+   3.14 if it is missing.
+2. Creates a virtual environment in `.venv/` inside the project folder.
+3. Installs the required packages (NumPy, matplotlib, and the optional markdown
+   package for the bundled docs).
+4. Creates the desktop shortcut.
 
-```
-soa_mortality_258*.csv ──> annuity_pricing.py ─┐   (local, default)
-immediateannuities.com ──> annuity_quote.py ───┤   (site, --quotes site)
-market_data.py ──> rate_model.py ──────────────┤   (dynamic discount rate)
-                                               ├─> withdrawal_projection.py ──> montecarlo.py ──> montecarlo_gui.py
-market_data.py ──> equity_model.py ────────────┘     (one random path)         (many paths + CIs)   (Tk front-end)
-```
+The installers are safe to re-run; the virtual environment and shortcuts are
+refreshed in place.
 
-## The scripts
+---
 
-### `annuity_pricing.py`
-The **default annuity pricer** — a self-contained, offline actuarial calculation
-on the SOA 2012 IAM mortality tables. It prices a single-premium immediate annuity
-(SPIA): the level lifetime income a lump sum buys, paid monthly. Both
-`withdrawal_projection.py` and `montecarlo.py` use it as their default payout
-engine.
-
-- **`single_life_annuity(amount, age, gender, interest_rate=0.035, ...)`** and
-  **`last_survivor_annuity(amount, age1, gender1, age2, gender2, ...)`** return the
-  **annual** payout. The last-survivor product pays as long as *either* person is
-  alive.
-- Method: actuarial present value with a flat interest rate, monthly-in-arrears
-  timing (Woolhouse `a_x + 11/24`), and the last-survivor factor
-  `a_LS = a_x + a_y − a_xy`.
-- **`--improvement`** projects the 2012 base rates forward generationally with SOA
-  Projection Scale G2 (`soa_mortality_2583.csv` / `2584.csv`), lowering payouts as
-  lifespans lengthen.
-- **`--compare`** benchmarks the model against live site quotes at ages 60/65/70/80.
-  At the default 3.5% the model pays ~80–94% of the site; it matches the site at
-  roughly **5%** interest (i.e. current site quotes imply ~5%, not 3.5%).
-
-```bash
-# single-life, $100k, 65-year-old male, default 3.5%
-python annuity_pricing.py 100000 65 M
-
-# last-survivor, 65M & 63F, at 4% with Scale G2 improvement
-python annuity_pricing.py 100000 65 M --joint-age 63 --joint-gender F \
-    --interest 0.04 --improvement
-
-# benchmark the model vs the live site
-python annuity_pricing.py --compare
-```
-
-The base tables are `soa_mortality_2581.csv` (male) / `2582.csv` (female); the
-Scale G2 improvement tables are `2583.csv` / `2584.csv`. All are `age,d` CSVs.
-
-### `annuity_quote.py`
-The **opt-in site pricer** (`--quotes site`). Looks up the monthly life-annuity
-payout for a lump sum by submitting the immediateannuities.com quote form
-(assuming income begins in 1 month) and reading the dollar figure in the "Life"
-row. Uses only the standard library; requires network access.
-
-- **Inputs:** `amount age gender state`, plus optional `--joint-age` /
-  `--joint-gender` for a joint-life (two-person) annuity.
-- **Output:** the monthly payout as a bare number (no `$` or commas), so it pipes
-  cleanly. Importable as `get_life_quote(...)`, which returns a `"$NNN"` string.
-
-```bash
-python annuity_quote.py 100000 65 M FL
-# -> 685
-
-python annuity_quote.py 250000 70 female CA --joint-age 68 --joint-gender M
-
-# pipeable:
-python annuity_quote.py 100000 65 M FL | awk '{print $1*12}'
-```
-
-### `market_data.py`
-Not a CLI — a data module. Holds the paired historical series of S&P 500 nominal
-total returns and CPI annual-average inflation, 1928–2025, keyed by year so the
-two stay aligned, plus the annual 10-year Treasury yield (FRED `GS10`, from 1953)
-used to fit the dynamic rate model. Exposes `equity_returns()`,
-`inflation_rates()`, and `treasury_10y_regression_data()`.
-
-### `rate_model.py`
-The **dynamic discount-rate model** (used by `--dynamic-rates`). The annuity
-discount rate is not fixed: it partially adjusts each year toward a long-run
-Fisher target driven by the *previous* year's inflation (an error-correction
-model), so higher-inflation paths get higher yields and larger nominal payouts,
-while the implied real rate compresses — and can go briefly negative — when
-inflation spikes, as in 2021–22. Parameters are **fit by OLS** to historical
-10-year Treasury yields and CPI (1954–2025; `a ≈ 1.7%`, `b ≈ 1.13`, `λ ≈ 0.17`,
-R² ≈ 0.93). `fit_rate_model.py` prints the fit and regenerates `FIT.md`/`FIT.pdf`;
-the full derivation, error exhibits, and graphs are in `METHODOLOGY.pdf`.
-
-### `equity_model.py`
-The scenario generator. `JointReturnModel` samples one-year `(equity return,
-inflation)` pairs **jointly**, preserving the historical equity/inflation
-relationship. Three modes:
-
-- **`bootstrap`** (default) — resample actual historical year-pairs (IID).
-  Preserves the real distribution's fat left tail and skew.
-- **`block`** — circular block bootstrap: resample consecutive runs of
-  `block_length` years (default 5) to also preserve *serial* correlation
-  (notably inflation's strong year-to-year persistence).
-- **`lognormal`** — draw from a bivariate normal fitted to the log series; smooth
-  but understates tail risk.
-
-> **Note — how inflation is used.** In the default (constant) mode the simulators
-> don't use the *sampled* inflation directly: inflation is a constant assumption
-> (`--inflation`, default 2.5%) and each sampled year's paired historical inflation
-> is used only to **restate** the equity return onto that constant basis (strip out
-> the embedded historical inflation, keep the real return, re-apply the constant).
-> Under `--dynamic-rates` the sampled inflation **is** used directly — to deflate to
-> today's dollars and to drive the discount rate (`rate_model.py`) — and equity is
-> left as drawn, so the historical equity/inflation pairing stays intact.
-
-Run it directly to print the calibrated statistics:
-
-```bash
-python -c "from equity_model import JointReturnModel; print(JointReturnModel('block').summary())"
-```
-
-### `withdrawal_projection.py`
-Simulates **one** random 30-year path. Each year it: prices the annuity payout
-for the current balance and age (the payout is linear in premium, so a single
-rate per age is computed and scaled), withdraws 12× that monthly payout, grows the
-remainder by that year's equity return, then ages everyone by one year. Pricing is
-local by default; with `--quotes site`, quote ages above 90 are clamped to the
-age-90 rate (the site's maximum), while the local pricer handles any age.
-
-- **Inputs:** `amount age gender state` plus `--joint-age`/`--joint-gender`,
-  `--years` (default 30), `--inflation` (default 0.025), `--model`,
-  `--block-length`, the pricing flags `--quotes local|site` (default `local`),
-  `--interest` (default 0.035), `--improvement`, `--quote-year`,
-  `--dynamic-rates`/`--initial-rate` (dynamic inflation + discount rate; see
-  [`rate_model.py`](#rate_modelpy)),
-  `--upper-bound`/`--lower-bound` (see [Withdrawal bounds](#withdrawal-bounds)),
-  and `--seed`. The `state` argument is only used with `--quotes site`.
-- **Output:** a calibration header, a year-by-year table (balance, **annual**
-  payout, that year's equity return and inflation, ending balance), and the
-  ending balance. **All dollar figures are nominal** — use `montecarlo.py` for
-  the today's-dollar (inflation-adjusted) view.
-
-```bash
-# reproducible single path (local pricing at the default 3.5%)
-python withdrawal_projection.py 1000000 65 M FL --seed 1
-
-# local pricing at 4% with Scale G2 mortality improvement
-python withdrawal_projection.py 1000000 65 M FL --interest 0.04 --improvement
-
-# joint life via live site quotes, lognormal model
-python withdrawal_projection.py 1000000 65 M FL --quotes site \
-    --joint-age 63 --joint-gender F --model lognormal
-
-# block bootstrap with 10-year blocks
-python withdrawal_projection.py 1000000 70 F CA --model block --block-length 10
-
-# dynamic inflation with a discount rate that tracks it
-python withdrawal_projection.py 1000000 65 M FL --dynamic-rates --model block
-
-# cap real spending at 120% and floor it at 50% of year 1
-python withdrawal_projection.py 1000000 65 M FL --upper-bound 1.2 --lower-bound 0.5
-```
-
-Reusable functions for callers: `build_rate_cache(...)` and `simulate_path(...)`.
-
-#### Withdrawal bounds
-
-`withdrawal_projection.py` and `montecarlo.py` both accept optional
-`--upper-bound` and `--lower-bound` **factors** that cap and floor the annual
-withdrawal **in today's dollars**, relative to the **first year's** withdrawal.
-For example, if year 1 withdraws the equivalent of $50,000 in today's dollars,
-then `--upper-bound 1.2` limits every later year to at most $60,000 and
-`--lower-bound 0.5` keeps every later year at no less than $25,000 (both in
-today's dollars). The clamp is applied to the cash actually withdrawn, so it
-feeds back into the surviving balance. By default there is no cap or floor.
-
-### `montecarlo.py`
-Runs **many** paths (default 5000) and reports the distribution of outcomes: the
-mean, median, and 80% / 90% / 95% / 99% confidence intervals for both the ending
-balance (nominal and today's dollars) and the **annual** payout by year (in
-today's dollars). It builds the annuity-rate cache once and reuses it across every
-path, so pricing cost (and any network traffic) stays at ~one rate per age
-regardless of the number of simulations; with the default local pricing this is
-instant and offline.
-
-- **Inputs:** same as `withdrawal_projection.py` (including `--inflation`, the
-  pricing flags `--quotes`/`--interest`/`--improvement`/`--quote-year`,
-  `--dynamic-rates`/`--initial-rate`, and `--upper-bound`/`--lower-bound`), plus
-  `--sims` (default 5000).
-- A "C% confidence interval" is the central interval covering C% of outcomes
-  (e.g. 80% = the 10th–90th percentile range).
-- Each year's withdrawal is capped at the available balance, so the balance
-  **never goes negative**; a path that depletes holds at zero (withdrawing zero)
-  for its remaining years. The PDF report's balance chart uses a
-  pseudo-log (symlog) y-axis so depletion to $0 and the wide tail-to-tail spread
-  are both legible.
-- The ending-balance (today's dollars) block also reports the **worst single-year**
-  and **worst cumulative five-year** *real* (inflation-adjusted) equity total
-  return seen anywhere in the simulation.
-- When run interactively it then offers to save the report to a **PDF** or
-  **CSV** file (type `PDF`, `csv`, or `exit` at the prompt); after each save it
-  asks again, so you can write several files, and keeps prompting until you type
-  `exit`. The **PDF** is a single consolidated, figure-rich report
-  (`report_pdf.py`, matplotlib): summary cards, the balance fan chart,
-  median/stress-scenario charts, and a per-year table — see the GUI section below.
-  The prompt is skipped when output is piped or redirected.
-
-```bash
-# default 5000-path run (local pricing, offline)
-python montecarlo.py 1000000 65 M FL
-
-# local pricing at 4% with Scale G2 mortality improvement
-python montecarlo.py 1000000 65 M FL --interest 0.04 --improvement
-
-# dynamic inflation + discount rate that tracks it
-python montecarlo.py 1000000 65 M FL --dynamic-rates --model block
-
-# 2000 paths via live site quotes, block bootstrap, fixed seed
-python montecarlo.py 1000000 65 M FL --quotes site --sims 2000 --model block --seed 1
-
-# joint life, capping/flooring real spending relative to year 1
-python montecarlo.py 1000000 65 M FL --joint-age 63 --joint-gender F \
-    --upper-bound 1.2 --lower-bound 0.5
-```
-
-### `montecarlo_gui.py`
-A Tcl/Tk (tkinter) desktop front-end for `montecarlo.py`, for running the
-simulation without the command line.
+## The GUI
 
 ![The Monte Carlo GUI](mc_gui.png)
 
-The top **Inputs** panel collects the same parameters as the command line,
-including **Inflation**, the **Quotes** source (local/site), a single **Interest
-rate** (the fixed discount rate when static, or the starting rate when dynamic), a
-**Dynamic inflation + rate** checkbox, and a **Scale G2 mortality improvement**
-checkbox. The numeric **Inflation** and **Interest rate** fields read a blank
-entry as **0**. Fields with a fixed set of
-choices — **Gender**, **State**, **Model**, **Joint gender**, and **Quotes** — are
-drop-downs; the rest are text entries, and blank optional fields (joint
-age/gender, upper/lower bound, seed) are simply omitted. The whole form is
-keyboard-navigable: **Tab** moves the focus through every input and on to the
-**Submit** button, and pressing **Enter** while Submit has focus runs the
-simulation — no mouse required.
+Launch the application from the desktop shortcut the installer created. The
+window has three sections: an **Inputs** panel at the top, a scrollable
+**report** area in the middle, and a row of **action buttons** at the bottom.
 
-The run happens on a background thread (the status line shows its progress) so
-the window stays responsive while the annuity-rate cache is built (instantly for
-local pricing; over the network for the site source). When it finishes, the full
-report appears in the scrollable monospaced panel and the bottom buttons activate:
+### Inputs
 
-- **Export PDF** — save the single consolidated, figure-rich report
-  (`report_pdf.py`, matplotlib). Page 1 leads with two **summary cards** (the
-  ending-balance distribution in today's and nominal dollars — mean, median, the
-  80/90/95/99% central intervals, and the worst real equity returns) and a
-  highlighted downside line, above a **fan chart** of the end-of-year balance
-  distribution in today's dollars (median plus central-interval bands, shaded
-  green above the median and red below, darkening toward the tails so the
-  unfavourable region stands out, on a pseudo-log y-axis so depletion to $0 is
-  visible). A **Median and Stress Scenarios** section follows, pairing a dual-axis
-  market-return / inflation / discount-rate chart with the mean/min/max annual
-  withdrawal and ending balance for the median, 10th-, 2.5th-, and
-  0.5th-percentile ending-balance paths, and finally a paginated **per-year
-  summary table**.
-- **Export CSV** — save the most recent report as numeric rows via a file dialog,
-  using the same writer as the command-line tool.
-- **Docs** (README / Methodology / Fit notes) — open the bundled documentation in
-  the OS default viewer; available at any time, independent of a run.
-- **Exit** — close the window.
+#### Portfolio
 
-Run it with a Python build that includes tkinter (the project `.venv` does):
+| Field | What to enter |
+|-------|---------------|
+| **Amount** | Starting equity portfolio balance (e.g. `1,000,000`). Commas are accepted. |
+| **Age** | Your current age. Used to look up the annuity payout rate. |
+| **Gender** | `M` or `F`. |
+| **State** | Your U.S. state. Used only when **Quotes** is set to `site`; ignored otherwise. |
+| **Joint age** | (Optional) Age of a spouse or partner. Leave blank for a single-life calculation. |
+| **Joint gender** | (Optional) Gender of the second person. Must be filled in if Joint age is given. |
+
+#### Simulation settings
+
+| Field | What to enter |
+|-------|---------------|
+| **Sims** | Number of Monte Carlo paths to run (default 5,000). More paths give smoother percentile estimates; 1,000–10,000 is a reasonable range. |
+| **Years** | How many years to project (default 30). |
+| **Model** | The scenario generator: `bootstrap`, `block` (recommended), or `lognormal`. See [Simulating returns, inflation, and interest rates](#simulating-returns-inflation-and-interest-rates). |
+| **Block length** | Only used when **Model** is `block`. The number of consecutive historical years drawn together (default 5). A longer block better preserves multi-year trends but samples fewer distinct blocks from the 98-year history. |
+| **Seed** | Optional integer. Setting a seed makes runs reproducible. Leave blank for a fresh random run each time. |
+
+#### Spending controls
+
+| Field | What to enter |
+|-------|---------------|
+| **Upper bound** | (Optional) Maximum real spending as a multiple of the first year's withdrawal. For example, `1.3` limits every later year to at most 30% more than year 1 in today's dollars. Useful if you want to bank gains rather than spend them all. |
+| **Lower bound** | (Optional) Minimum real spending as a multiple of the first year's withdrawal. For example, `0.6` ensures that even in a bad market the withdrawal does not drop below 60% of year 1's level. |
+
+#### Annuity pricing and rates
+
+| Field / control | What it does |
+|-----------------|--------------|
+| **Inflation** | Assumed annual inflation rate (default 2.5%). Used to deflate results to today's dollars when **Dynamic inflation + rate** is off. |
+| **Quotes** | `local` (default, offline, instant) or `site` (live quotes from immediateannuities.com, requires internet). Local pricing uses published SOA actuarial tables and matches market quotes at roughly 4.5–5% interest. |
+| **Interest rate** | The annuity discount rate. When **Dynamic inflation + rate** is off this is a fixed rate used throughout; when it is on this is the *starting* rate and the model evolves it each year. Default is 4.3% (approximately the 2026 10-year Treasury yield). |
+| **Dynamic inflation + rate** | Check this box to simulate both inflation and interest rates year-by-year rather than holding them constant. This is the recommended setting; see [Simulating returns, inflation, and interest rates](#simulating-returns-inflation-and-interest-rates). Requires **Quotes = local**. |
+| **Scale G2 mortality improvement** | Applies the SOA Projection Scale G2 mortality improvement factors, projecting longer lifespans forward from the 2012 base tables. This lowers the annual payout slightly, reflecting that people who are alive to collect an annuity tend to live longer than the general population average. Requires **Quotes = local**. |
+
+#### Running the simulation
+
+Press **Submit** (or Tab to the Submit button and press Enter) to start the
+run. The simulation runs in the background so the window stays responsive. The
+status line shows progress; a typical 5,000-path run with local pricing
+finishes in a few seconds.
+
+---
+
+### On-screen report
+
+When the simulation finishes, a text report appears in the scrollable panel.
+It shows:
+
+- **Calibration header** — the parameters used: amount, age, gender, model,
+  interest rate, inflation, and the first year's annuity payout rate.
+
+- **Ending balance distribution** — after the full projection period, the mean,
+  median, and 80% / 90% / 95% / 99% central confidence intervals for the
+  ending balance, expressed in both today's dollars (inflation-adjusted) and
+  nominal dollars. A "C% interval" is the central range covering C% of
+  outcomes (e.g. the 80% interval spans the 10th-to-90th percentile range of
+  all simulated paths). The block also notes the fraction of paths that end
+  below the starting amount in real terms, and below half of it.
+
+- **Annual payout by year** — for each projected year, the same confidence
+  intervals for that year's annual withdrawal, in today's dollars. This lets
+  you see how income might vary from year to year across the range of market
+  scenarios.
+
+- **Worst historical returns seen in the run** — the worst single-year and
+  worst cumulative five-year real equity total return that appeared anywhere in
+  the simulation, drawn from historical data.
+
+Balances are capped at zero: a path that depletes the portfolio holds at zero
+for its remaining years. The depletion rate is visible in the downside
+statistics.
+
+---
+
+### PDF report
+
+Click **Export PDF** to save a figure-rich report. A file dialog lets you
+choose the file name and location; the PDF opens automatically after it is
+saved.
+
+The report contains:
+
+1. **Summary cards** (page 1, top) — two side-by-side cards summarizing the
+   ending-balance distribution: one in today's dollars, one in nominal dollars.
+   Each card shows the mean, median, and the 80/90/95/99% confidence intervals.
+   A highlighted line calls out the downside statistics (fraction of paths that
+   finish below the starting amount in real terms, and below half of it).
+
+2. **Balance fan chart** (page 1, below the cards) — a year-by-year chart of
+   the portfolio balance distribution in today's dollars. The median path runs
+   through the center. Bands fan out above and below: green bands above the
+   median (shaded more darkly the further they are from the median), red bands
+   below it (darkening toward the worst outcomes), so the unfavorable region
+   draws the eye. The y-axis uses a pseudo-log scale so paths that deplete to
+   zero remain visible alongside the wide upper tail.
+
+3. **Median and stress scenarios** — for each of four representative paths
+   (median, 10th-percentile, 2.5th-percentile, and 0.5th-percentile ending
+   balance), a dual-axis chart shows that path's market return, inflation, and
+   annuity discount rate year by year, paired with the mean, minimum, and
+   maximum annual withdrawal for that path and its ending balance.
+
+4. **Per-year summary table** — a paginated table giving the balance
+   percentiles and median annual withdrawal in today's dollars for each
+   projected year.
+
+### CSV export
+
+Click **Export CSV** to save the numerical results as a spreadsheet-compatible
+file. The CSV contains the same per-year statistics shown in the report (balance
+percentiles and withdrawal amounts).
+
+### Documentation buttons
+
+The **Docs** buttons (README, Methodology, Fit notes) open the bundled
+documentation in your system's default viewer at any time, independent of
+whether a simulation has been run.
+
+---
+
+## Simulating returns, inflation, and interest rates
+
+### How equity returns are modeled
+
+Every simulated year requires a nominal equity return. The simulator draws from
+**98 years of paired S&P 500 total-return and CPI data (1928–2025)**. Three
+scenario generators are available:
+
+- **bootstrap** (default) — resample actual historical year-pairs with
+  replacement (IID). Preserves the empirical distribution including the fat
+  left tail and skew that parametric models smooth away.
+- **block** *(recommended)* — circular block bootstrap: draw consecutive runs
+  of `block_length` historical years and stitch them together. Unlike the IID
+  bootstrap this preserves **serial correlation** — multi-year inflation
+  persistence and equity momentum or mean-reversion — which widens the left
+  tail of multi-year outcomes and gives a more realistic picture of
+  sequence-of-returns risk.
+- **lognormal** — draw from a fitted bivariate normal distribution. Smooth,
+  but understates tail risk.
+
+Equity and inflation are always drawn **jointly** (as matched historical pairs),
+preserving their historical correlation.
+
+### Constant vs. dynamic inflation and interest rates
+
+**Constant inflation (default):** A single inflation assumption (default 2.5%)
+deflates all results to today's dollars, and a single discount rate prices the
+annuity payout each year. To keep equity returns consistent with the assumed
+inflation, each sampled year's nominal return is restated: the historical
+inflation embedded in it is stripped out and the assumed inflation re-applied,
+preserving the real return.
+
+**Dynamic inflation and rates (recommended — check "Dynamic inflation + rate"):**
+Inflation varies year-to-year using the sampled historical rates from the block
+bootstrap, so each path experiences its own inflation sequence. Equity returns
+are used as drawn (preserving the historical equity/inflation pairing). The
+annuity discount rate evolves each year according to an error-correction model
+fit to 10-year Treasury yields and CPI from 1954–2025: the rate adjusts slowly
+toward a long-run Fisher target driven by last year's inflation, with a fitted
+adjustment speed of about one-sixth of the gap per year. This reproduces the
+sluggish pass-through observed historically, including the negative real yields
+of 2020–2022. All results are still deflated to today's dollars using each
+path's cumulative inflation.
+
+### Recommended settings
+
+For the most realistic assessment of long-run risk:
+
+- Set **Model** to `block` with the default block length of 5 years.
+- Check **Dynamic inflation + rate**.
+- Leave **Quotes** as `local` (required for dynamic rates, and runs instantly).
+- Read the results in **today's dollars** — the on-screen report and fan chart
+  both express balances and withdrawals in real (inflation-adjusted) terms.
+
+The constant-inflation mode is useful for quick runs or for isolating the
+effect of a specific assumption, but the dynamic mode gives a more complete
+picture because it lets inflation and interest rates vary together with
+equity returns as they do in history.
+
+Full technical details — model specification, OLS estimates, fit diagnostics,
+and references — are in **METHODOLOGY.pdf** (accessible from the **Docs**
+button in the GUI).
+
+---
+
+## Appendix: running individual scripts from the command line
+
+The GUI wraps the Python scripts, which can also be run directly from a
+terminal. All scripts accept `--help` for a full list of options.
+
+### `montecarlo.py` — many-path simulation
 
 ```bash
-python montecarlo_gui.py
+# default 5000-path run (local pricing, offline)
+.venv/bin/python montecarlo.py 1000000 65 M FL
+
+# dynamic inflation + interest rate, block bootstrap (recommended)
+.venv/bin/python montecarlo.py 1000000 65 M FL --dynamic-rates --model block
+
+# joint life with spending bounds
+.venv/bin/python montecarlo.py 1000000 65 M FL \
+    --joint-age 63 --joint-gender F \
+    --upper-bound 1.3 --lower-bound 0.6
+
+# save a PDF report directly
+.venv/bin/python montecarlo.py 1000000 65 M FL
+# -> type PDF at the prompt
 ```
 
-## Man pages
-
-Three troff man pages are included (section 1):
-
-- `withdrawal_projection.1`
-- `montecarlo.1`
-- `annuity_pricing.1`
-
-View them without installing:
+### `withdrawal_projection.py` — single random path
 
 ```bash
-man ./withdrawal_projection.1
+# reproducible single path
+.venv/bin/python withdrawal_projection.py 1000000 65 M FL --seed 1
+
+# block bootstrap with dynamic rates
+.venv/bin/python withdrawal_projection.py 1000000 65 M FL \
+    --dynamic-rates --model block
+```
+
+### `annuity_pricing.py` — standalone annuity calculator
+
+```bash
+# single-life, $100k, age 65 male
+.venv/bin/python annuity_pricing.py 100000 65 M
+
+# joint life, 65M & 63F, at 4% with Scale G2 improvement
+.venv/bin/python annuity_pricing.py 100000 65 M \
+    --joint-age 63 --joint-gender F --interest 0.04 --improvement
+
+# compare local model to live immediateannuities.com quotes
+.venv/bin/python annuity_pricing.py --compare
+```
+
+Man pages (viewable without installing) are included for the three main scripts:
+
+```bash
 man ./montecarlo.1
+man ./withdrawal_projection.1
 man ./annuity_pricing.1
 ```
 
-(`annuity_quote.py`, `equity_model.py`, `market_data.py`, `rate_model.py`, and
-`montecarlo_gui.py` do not have man pages; see the docstrings and `--help`.)
-
-## Methodology documents
-
-- **`METHODOLOGY.pdf`** (source `METHODOLOGY.md`) — how the whole Monte Carlo
-  works end to end: the scenario model, annuity pricing, the dynamic
-  inflation/rate model with its **fit, error exhibits, and graphs**, assumptions,
-  and cited sources.
-- **`FIT.pdf`** (source `FIT.md`, regenerated by `fit_rate_model.py --markdown`) —
-  a focused report of the interest-rate model fit (OLS estimates, diagnostics).
-
-Both are regenerated from Markdown; see the build steps in those source files.
+---
 
 ## License
 
-Licensed under the [Mozilla Public License 2.0](LICENSE). The software is provided
-"as is", without warranty of any kind — see Sections 6 ("Disclaimer of Warranty")
-and 7 ("Limitation of Liability") of the license.
+Licensed under the [Mozilla Public License 2.0](LICENSE). The software is
+provided "as is", without warranty of any kind — see Sections 6 ("Disclaimer of
+Warranty") and 7 ("Limitation of Liability") of the license.
