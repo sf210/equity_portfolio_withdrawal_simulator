@@ -361,6 +361,15 @@ class MonteCarloGUI:
         self.root.update_idletasks()
         try:
             import report_pdf
+        except ImportError as exc:
+            messagebox.showerror(
+                "Missing dependency",
+                f"The graphical PDF report needs matplotlib, which is not "
+                f"installed in this environment ({exc}).\n\n"
+                f"Install it with:\n    pip install -r requirements.txt")
+            self.status.configure(text="Error: matplotlib not installed.")
+            return
+        try:
             report_pdf.write_report_pdf(path, self._last_report_data)
         except (OSError, ValueError) as exc:
             messagebox.showerror("Export failed", str(exc))
