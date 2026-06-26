@@ -1,0 +1,17 @@
+# Dependencies for the web front end (webapp/app.py). Install on the server with:
+#     pip install -r webapp/requirements-web.txt
+#
+# This pulls in the simulation engine's own runtime deps (numpy for the sims,
+# matplotlib for the PDF report) plus the web stack.
+
+# --- simulation engine (mirrors the pins in the repo-root requirements.txt) ---
+numpy==2.4.4
+matplotlib==3.11.0
+
+# --- web stack ---
+Flask==3.1.3
+gunicorn==26.0.0
+
+# Per-IP rate limiting. Optional: app.py degrades to no limiting if it is
+# absent, but on a public server you want it installed.
+Flask-Limiter==4.1.1
