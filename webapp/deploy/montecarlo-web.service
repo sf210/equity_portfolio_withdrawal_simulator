@@ -22,7 +22,8 @@ Environment=MC_WORKERS=2
 Environment=MC_MAX_SIMS=20000
 Environment=MC_MAX_YEARS=60
 Environment=MC_MAX_CONCURRENT=2
-Environment=MC_RATE_LIMITS=60 per hour;10 per minute
+# Quote any value with spaces: systemd splits Environment= on whitespace.
+Environment="MC_RATE_LIMITS=60 per hour;10 per minute"
 # Keep matplotlib's font cache in a writable, persistent dir.
 Environment=MPLCONFIGDIR=/opt/montecarlo/.cache/matplotlib
 ExecStart=/opt/montecarlo/.venv/bin/gunicorn -c webapp/gunicorn_conf.py webapp.app:app
