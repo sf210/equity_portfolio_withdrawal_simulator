@@ -100,6 +100,61 @@ panels.
 
 ---
 
+## Protecting the analytics login
+
+The `/analytics/` page is the only password exposed to the internet (SSH is
+key-only, so it has no password to brute-force). Harden it one of two ways.
+
+### Option A: fail2ban on the basic-auth login (recommended)
+
+A default fail2ban install only enables the `sshd` jail; it does **not** watch
+nginx basic-auth. Enable the `nginx-http-auth` jail so repeated failed
+`/analytics/` logins get the offending IP banned:
+
+```bash
+sudo tee /etc/fail2ban/jail.local >/dev/null <<'EOF'
+[sshd]
+enabled = true
+
+[nginx-http-auth]
+enabled  = true
+port     = http,https
+logpath  = /var/log/nginx/error.log
+maxretry = 5
+findtime = 600
+bantime  = 3600
+EOF
+sudo systemctl restart fail2ban
+sudo fail2ban-client status                    # should list nginx-http-auth
+sudo fail2ban-client status nginx-http-auth    # current bans
+```
+
+That bans an IP for an hour after 5 failed logins in 10 minutes. fail2ban only
+*slows* brute force — still use a long, random htpasswd password.
+
+### Option B: IP-allowlist instead of (or with) a password
+
+If only you need the analytics, restrict the location to your own IP and skip
+the password entirely. In the `location /analytics/` block:
+
+```nginx
+    location /analytics/ {
+        allow   203.0.113.10;   # your home/office IP
+        deny    all;
+
+        alias /var/www/analytics/;
+        index index.html;
+        add_header Cache-Control "no-store" always;
+        # auth_basic lines optional once allow/deny is in place
+    }
+```
+
+Then `sudo nginx -t && sudo systemctl reload nginx`. This is the strongest
+option (nothing reachable from other IPs), but you must update the IP if yours
+changes. You can keep basic-auth as well for belt-and-suspenders.
+
+---
+
 ## Notes
 
 * **What "visitors" means.** GoAccess counts unique visitors per day by IP +
