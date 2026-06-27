@@ -124,7 +124,7 @@ class MonteCarloGUI:
 
         row(2, 0, "Gender"); self.gender = combo(2, 0, ["M", "F"], "M")
         row(2, 2, "Model")
-        self.model = combo(2, 2, ["bootstrap", "block", "lognormal"], "bootstrap")
+        self.model = combo(2, 2, ["bootstrap", "block", "lognormal"], "block")
 
         row(3, 0, "State")
         self.state = combo(3, 0, sorted(annuity_quote.STATES), "FL")
@@ -139,7 +139,7 @@ class MonteCarloGUI:
 
         row(6, 0, "Seed"); self.seed = entry(6, 0, "42")
         row(6, 2, "Inflation")
-        self.inflation = entry(6, 2, str(mc.wp.DEFAULT_INFLATION))
+        self.inflation = entry(6, 2, "")
 
         row(7, 0, "Quotes")
         self.quotes = combo(7, 0, ["local", "site"], mc.wp.DEFAULT_QUOTES)
@@ -148,12 +148,12 @@ class MonteCarloGUI:
         row(7, 2, "Interest rate")
         self.interest = entry(7, 2, str(mc.rate_model.DEFAULT_INITIAL_RATE))
 
-        self.dynamic = tk.BooleanVar(value=False)
+        self.dynamic = tk.BooleanVar(value=True)
         ttk.Checkbutton(frm, text="Dynamic inflation + rate (local only)",
                         variable=self.dynamic).grid(
             row=8, column=0, columnspan=3, sticky="w", pady=2)
 
-        self.improvement = tk.BooleanVar(value=False)
+        self.improvement = tk.BooleanVar(value=True)
         ttk.Checkbutton(frm, text="Scale G2 mortality improvement (local only)",
                         variable=self.improvement).grid(
             row=9, column=0, columnspan=2, sticky="w", pady=2)
