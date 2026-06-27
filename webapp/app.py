@@ -280,7 +280,7 @@ def _hidden_fields(params: dict) -> dict:
 def index():
     return render_template(
         "index.html", values=DEFAULTS, models=MODELS, genders=GENDERS,
-        states=STATES, report=None, error=None, hidden=None,
+        states=STATES, report=None, params_line=None, error=None, hidden=None,
         max_sims=MAX_SIMS, max_years=MAX_YEARS)
 
 
@@ -291,13 +291,14 @@ def run():
     except FormError as exc:
         return render_template(
             "index.html", values=request.form, models=MODELS, genders=GENDERS,
-            states=STATES, report=None, error=str(exc), hidden=None,
-            max_sims=MAX_SIMS, max_years=MAX_YEARS), 400
+            states=STATES, report=None, params_line=None, error=str(exc),
+            hidden=None, max_sims=MAX_SIMS, max_years=MAX_YEARS), 400
 
-    report_text, _csv_kwargs, _report_data = _simulate(params)
+    report_text, _csv_kwargs, report_data = _simulate(params)
     return render_template(
         "index.html", values=request.form, models=MODELS, genders=GENDERS,
-        states=STATES, report=report_text, error=None,
+        states=STATES, report=report_text,
+        params_line=report_data["params_line"], error=None,
         hidden=_hidden_fields(params),
         max_sims=MAX_SIMS, max_years=MAX_YEARS)
 
@@ -347,6 +348,22 @@ def export_csv():
             pass
     return send_file(io.BytesIO(data), mimetype="text/csv",
                      as_attachment=True, download_name="montecarlo_report.csv")
+
+
+# Reference documents shipped in the repo root, served inline (view in browser).
+_DOCS = {"methodology": "METHODOLOGY.pdf", "motivation": "motivation.pdf"}
+
+
+@app.route("/docs/<name>")
+def docs(name):
+    filename = _DOCS.get(name)
+    if filename is None:
+        abort(404)
+    path = _ROOT / filename
+    if not path.exists():
+        abort(404)
+    return send_file(path, mimetype="application/pdf", as_attachment=False,
+                     download_name=filename)
 
 
 @app.route("/healthz")

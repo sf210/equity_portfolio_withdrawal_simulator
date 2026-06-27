@@ -44,6 +44,27 @@
     .hint { font-size: 11.5px; color: var(--muted); }
     footer { max-width: 1000px; margin: 0 auto 28px; padding: 0 16px;
              font-size: 11.5px; color: var(--muted); }
+
+    /* Header documentation links */
+    .doclinks { margin-top: 8px; font-size: 12.5px; }
+    .doclinks a { color: #fff; font-weight: 600; text-decoration: underline;
+                  margin-right: 14px; }
+
+    /* Results section */
+    .results-title { margin: 0 0 12px; font-size: 20px; color: var(--accent);
+                     border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+    .scenario { font-size: 13.5px; line-height: 1.5; background: #eef4ef;
+                border-left: 4px solid var(--accent); border-radius: 4px;
+                padding: 10px 14px; margin: 0 0 14px; word-break: break-word; }
+    .scenario strong { color: var(--accent); }
+    .ci-note { font-size: 13px; line-height: 1.5; color: var(--fg);
+               background: #fffaf0; border: 1px solid #f3e2bd;
+               border-radius: 6px; padding: 10px 14px; margin: 0 0 16px; }
+    .ci-note strong { color: #8a5a00; }
+    .report-heading { font-size: 14px; font-weight: 700; margin: 4px 0 6px;
+                      color: var(--fg); }
+    .docs-more { margin: 14px 0 0; font-size: 13px; }
+    .docs-more a { color: var(--accent); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -52,6 +73,10 @@
     <p>Simulate equity-portfolio withdrawals against an annuity-equivalent income.
        Local SOA-mortality pricing. Up to {{ "{:,}".format(max_sims) }} simulations,
        {{ max_years }} years.</p>
+    <div class="doclinks">
+      <a href="/docs/methodology" target="_blank" rel="noopener">Methodology</a>
+      <a href="/docs/motivation" target="_blank" rel="noopener">Motivation</a>
+    </div>
   </header>
 
   <main>
@@ -131,7 +156,21 @@
 
     {% if report %}
     <div class="card">
-      <div class="actions" style="margin-top:0;margin-bottom:12px;">
+      <h2 class="results-title">Simulation Results with Confidence Intervals</h2>
+
+      {% if params_line %}
+      <p class="scenario"><strong>Scenario:</strong> {{ params_line }}</p>
+      {% endif %}
+
+      <p class="ci-note">
+        A <strong>confidence interval (CI)</strong> is the range your ending
+        balance falls within across the simulated scenarios. For example, the
+        <strong>90% CI</strong> spans the middle 90% of outcomes &mdash; about 5%
+        of scenarios finish above that range and 5% below it. A wider interval
+        means more uncertainty in the result.
+      </p>
+
+      <div class="actions" style="margin-top:0;margin-bottom:14px;">
         <form method="post" action="/export.pdf">
           {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
           <button type="submit" class="secondary">Download PDF report</button>
@@ -141,7 +180,14 @@
           <button type="submit" class="secondary">Download CSV</button>
         </form>
       </div>
+
+      <p class="report-heading">Detailed report</p>
       <div class="report">{{ report }}</div>
+
+      <p class="docs-more">Learn more:
+        <a href="/docs/methodology" target="_blank" rel="noopener">Methodology</a> &middot;
+        <a href="/docs/motivation" target="_blank" rel="noopener">Motivation</a>
+      </p>
     </div>
     {% endif %}
   </main>
