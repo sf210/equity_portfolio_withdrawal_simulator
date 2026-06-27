@@ -76,11 +76,11 @@ STATES = sorted(annuity_quote.STATES)
 # Defaults shown on a fresh form (mirrors the desktop GUI).
 DEFAULTS = {
     "amount": "1,000,000", "sims": "5000", "age": "65", "years": "30",
-    "gender": "M", "model": "bootstrap", "state": "FL", "block_length": "5",
+    "gender": "M", "model": "block", "state": "FL", "block_length": "5",
     "joint_age": "", "joint_gender": "", "upper_bound": "", "lower_bound": "",
-    "seed": "", "inflation": str(mc.wp.DEFAULT_INFLATION),
+    "seed": "", "inflation": "",
     "interest": str(mc.rate_model.DEFAULT_INITIAL_RATE),
-    "dynamic": "", "improvement": "",
+    "dynamic": "on", "improvement": "on",
 }
 
 app = Flask(__name__)
