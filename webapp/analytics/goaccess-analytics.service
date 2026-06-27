@@ -1,0 +1,15 @@
+# Oneshot service that refreshes the GoAccess analytics report.
+# Triggered by goaccess-analytics.timer. Install:
+#   sudo cp webapp/analytics/goaccess-analytics.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now goaccess-analytics.timer
+
+[Unit]
+Description=Refresh GoAccess analytics for the Monte Carlo web app
+After=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+# Runs as root so it can read /var/log/nginx/access.log.
+ExecStart=/opt/montecarlo/webapp/analytics/update-analytics.sh
+Nice=10

@@ -36,7 +36,8 @@ MC_PROXY_FIX=0 gunicorn -c webapp/gunicorn_conf.py webapp.app:app
 ## Deploy to a server
 
 See [DEPLOY.md](DEPLOY.md) for a full Linode walkthrough (gunicorn + nginx +
-Let's Encrypt + systemd).
+Let's Encrypt + systemd), and [ANALYTICS.md](ANALYTICS.md) for self-hosted
+visitor/geolocation tracking (GoAccess).
 
 ## Files
 
@@ -49,6 +50,8 @@ Let's Encrypt + systemd).
 | `deploy/montecarlo-web.service`   | systemd unit                             |
 | `deploy/nginx-montecarlo.conf`    | nginx reverse-proxy site                 |
 | `DEPLOY.md`                       | Linode deployment guide                  |
+| `analytics/`                      | GoAccess analytics kit (script + timer)  |
+| `ANALYTICS.md`                    | visitor/geolocation analytics guide      |
 
 ## Configuration
 
