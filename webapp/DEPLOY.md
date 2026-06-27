@@ -214,23 +214,14 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-At this point `http://montecarlo.example.com/` should redirect to HTTPS (which
-isn't valid yet — that's the next step).
+At this point `http://montecarlo.example.com/` serves the app over plain HTTP.
+The config ships HTTP-only; certbot adds HTTPS in §10.
 
-## 9. TLS with Let's Encrypt
+## 9. Open the firewall for the web
 
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d montecarlo.example.com --redirect --agree-tos -m you@example.com
-```
-
-certbot fills in the `ssl_certificate*` lines in the 443 server block and sets
-up auto-renewal (`systemctl list-timers | grep certbot`). Reload nginx if
-prompted.
-
-## 10. Open the firewall for the web
-
-You already enabled ufw for SSH in §2; now allow HTTP/HTTPS:
+You already enabled ufw for SSH in §2; now allow HTTP/HTTPS. **Do this before
+certbot** — Let's Encrypt validates by connecting to port 80, so it must be
+reachable first:
 
 ```bash
 sudo ufw allow 'Nginx Full'        # 80 + 443
@@ -239,6 +230,18 @@ sudo ufw status
 
 Gunicorn listens only on `127.0.0.1`, so it is not reachable from the internet
 except through nginx.
+
+## 10. TLS with Let's Encrypt
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d montecarlo.example.com --redirect --agree-tos -m you@example.com
+```
+
+certbot adds a `listen 443 ssl` server block (with the certificate paths) to the
+HTTP-only site, wires in the HTTP->HTTPS redirect (`--redirect`), and sets up
+auto-renewal (`systemctl list-timers | grep certbot`). For a bare domain plus
+`www`, pass both: `-d example.com -d www.example.com`.
 
 ## 11. Verify
 
