@@ -32,6 +32,7 @@ matching download does not recompute):
 
 from __future__ import annotations
 
+import csv
 import io
 import os
 import pathlib
@@ -41,11 +42,16 @@ import tempfile
 import threading
 from functools import lru_cache
 
-# The engine modules live in the repository root, one level up from webapp/.
+import numpy as np
+
+# The engine modules live in the repository root, one level up from webapp/;
+# webapp's own modules (figures.py) live in _HERE. Put both on the path so the
+# app imports the same way whether launched as webapp.app:app or webapp/app.py.
 _HERE = pathlib.Path(__file__).resolve().parent
 _ROOT = _HERE.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+for _p in (str(_ROOT), str(_HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import annuity_quote  # noqa: E402  (path set up above)
 import montecarlo as mc  # noqa: E402
@@ -278,14 +284,103 @@ def _hidden_fields(params: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Report building: summary table, per-year withdrawal table, worst-loss lines.
+# --------------------------------------------------------------------------- #
+# Percentiles shown throughout the report.
+PCTS = [1, 5, 10, 50, 90, 95, 98]
+PCT_HEADERS = ["1st", "5th", "10th", "Median", "90th", "95th", "98th"]
+
+
+def _money(v: float) -> str:
+    a = abs(v)
+    if a >= 1e6:
+        return f"${v / 1e6:,.2f}M"
+    if a >= 1e3:
+        return f"${v / 1e3:,.0f}k"
+    return f"${v:,.0f}"
+
+
+def _pct(frac: float) -> str:
+    return f"{frac * 100:,.0f}%"
+
+
+def _pcts(arr) -> list:
+    return [float(np.percentile(arr, p)) for p in PCTS]
+
+
+def _summary(data: dict) -> dict:
+    """Portfolio-summary rows: each metric across the percentile columns."""
+    eq, infl = data["equities"], data["inflations"]
+    total_nom = np.prod(1.0 + eq, axis=1) - 1.0
+    total_real = np.prod((1.0 + eq) / (1.0 + infl), axis=1) - 1.0
+    wd_nom = data["payouts_nominal"].mean(axis=1)
+    wd_real = data["payouts_real"].mean(axis=1)
+
+    def money_row(label, arr):
+        return {"label": label, "cells": [_money(v) for v in _pcts(arr)]}
+
+    def pct_row(label, arr):
+        return {"label": label, "cells": [_pct(v) for v in _pcts(arr)]}
+
+    rows = [
+        money_row("Ending balance — nominal", data["end_nom"]),
+        money_row("Ending balance — real (today's $)", data["end_real"]),
+        pct_row("Total return — nominal", total_nom),
+        pct_row("Total return — real", total_real),
+        money_row("Mean annual withdrawal — nominal", wd_nom),
+        money_row("Mean annual withdrawal — real", wd_real),
+    ]
+    worst = {"one_yr": _pct(data["worst_1yr"]),
+             "five_yr": None if data["worst_5yr"] is None else _pct(data["worst_5yr"])}
+    return {"headers": PCT_HEADERS, "rows": rows, "worst": worst}
+
+
+def _withdrawal_rows(data: dict) -> dict:
+    """Per-year withdrawal table (real $): mean, median, and percentiles."""
+    pay = data["payouts_real"]
+    age = data["age"]
+    years = pay.shape[1]
+    extra = [p for p in PCTS if p != 50]  # median shown separately
+    headers = (["Year", "Age", "Mean", "Median"]
+               + [("1st" if p == 1 else f"{p}th") for p in extra])
+    rows = []
+    for t in range(years):
+        col = pay[:, t]
+        cells = [_money(float(col.mean())), _money(float(np.median(col)))]
+        cells += [_money(float(np.percentile(col, p))) for p in extra]
+        rows.append({"year": t + 1, "age": age + t, "cells": cells})
+    return {"headers": headers, "rows": rows}
+
+
+def _withdrawal_csv(data: dict) -> str:
+    pay = data["payouts_real"]
+    age = data["age"]
+    extra = [p for p in PCTS if p != 50]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Withdrawals by year (real, today's dollars)"])
+    w.writerow(["year", "age", "mean", "median"] + [f"p{p}" for p in extra])
+    for t in range(pay.shape[1]):
+        col = pay[:, t]
+        w.writerow([t + 1, age + t, round(float(col.mean())),
+                    round(float(np.median(col)))]
+                   + [round(float(np.percentile(col, p))) for p in extra])
+    return buf.getvalue()
+
+
+def _render(values, error=None, status=200, **extra):
+    return render_template(
+        "index.html", values=values, models=MODELS, genders=GENDERS,
+        states=STATES, max_sims=MAX_SIMS, max_years=MAX_YEARS,
+        error=error, **extra), status
+
+
+# --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
-    return render_template(
-        "index.html", values=DEFAULTS, models=MODELS, genders=GENDERS,
-        states=STATES, report=None, params_line=None, error=None, hidden=None,
-        max_sims=MAX_SIMS, max_years=MAX_YEARS)
+    return _render(DEFAULTS, report=None)[0]
 
 
 @app.route("/run", methods=["POST"])
@@ -293,74 +388,38 @@ def run():
     try:
         params = parse_form(request.form)
     except FormError as exc:
-        return render_template(
-            "index.html", values=request.form, models=MODELS, genders=GENDERS,
-            states=STATES, report=None, params_line=None, error=str(exc),
-            hidden=None, max_sims=MAX_SIMS, max_years=MAX_YEARS), 400
+        return _render(request.form, error=str(exc), report=None, status=400)
 
     try:
-        report_text, _csv_kwargs, report_data = _simulate(params)
+        _text, _csv_kwargs, data = _simulate(params)
     except _GlobalDataMissing:
-        return render_template(
-            "index.html", values=request.form, models=MODELS, genders=GENDERS,
-            states=STATES, report=None, params_line=None,
-            error="The global developed-markets dataset is not installed on "
-                  "this server yet. Choose the 'us' sample, or ask the operator "
-                  "to run fetch_global_data.py.",
-            hidden=None, max_sims=MAX_SIMS, max_years=MAX_YEARS), 503
-    return render_template(
-        "index.html", values=request.form, models=MODELS, genders=GENDERS,
-        states=STATES, report=report_text,
-        params_line=report_data["params_line"], error=None,
-        hidden=_hidden_fields(params),
-        max_sims=MAX_SIMS, max_years=MAX_YEARS)
+        return _render(
+            request.form, report=None, status=503,
+            error="The global developed-markets dataset is not installed on this "
+                  "server yet. Choose the 'United States' sample, or ask the "
+                  "operator to run fetch_global_data.py.")
+
+    import figures  # lazy: pulls in matplotlib only when a report is built
+    return _render(
+        request.form, report=True, params_line=data["params_line"],
+        model_summary=data["model_summary"], figs=figures.build_figures(data),
+        summary=_summary(data), wd_table=_withdrawal_rows(data),
+        hidden=_hidden_fields(params))[0]
 
 
-@app.route("/export.pdf", methods=["POST"])
-def export_pdf():
+@app.route("/withdrawals.csv", methods=["POST"])
+def withdrawals_csv():
     try:
         params = parse_form(request.form)
     except FormError as exc:
         abort(400, str(exc))
-    _text, _csv_kwargs, report_data = _simulate(params)
     try:
-        import report_pdf
-    except ImportError:
-        abort(503, "The graphical PDF report needs matplotlib, which is not "
-                   "installed on this server.")
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp_path = tmp.name
-    try:
-        report_pdf.write_report_pdf(tmp_path, report_data)
-        data = pathlib.Path(tmp_path).read_bytes()
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-    return send_file(io.BytesIO(data), mimetype="application/pdf",
-                     as_attachment=True, download_name="montecarlo_report.pdf")
-
-
-@app.route("/export.csv", methods=["POST"])
-def export_csv():
-    try:
-        params = parse_form(request.form)
-    except FormError as exc:
-        abort(400, str(exc))
-    _text, csv_kwargs, _report_data = _simulate(params)
-    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-        tmp_path = tmp.name
-    try:
-        mc.write_csv(tmp_path, **csv_kwargs)
-        data = pathlib.Path(tmp_path).read_bytes()
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-    return send_file(io.BytesIO(data), mimetype="text/csv",
-                     as_attachment=True, download_name="montecarlo_report.csv")
+        _text, _csv_kwargs, data = _simulate(params)
+    except _GlobalDataMissing:
+        abort(503, "The global developed-markets dataset is not installed.")
+    body = _withdrawal_csv(data).encode()
+    return send_file(io.BytesIO(body), mimetype="text/csv", as_attachment=True,
+                     download_name="withdrawals_by_year.csv")
 
 
 # Reference documents shipped in the repo root, served inline (view in browser).
