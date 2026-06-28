@@ -49,6 +49,7 @@ if str(_ROOT) not in sys.path:
 
 import annuity_quote  # noqa: E402  (path set up above)
 import montecarlo as mc  # noqa: E402
+from global_market_data import GlobalDataMissing as _GlobalDataMissing  # noqa: E402
 
 from flask import (  # noqa: E402
     Flask, Response, abort, render_template, request, send_file,
@@ -68,19 +69,19 @@ SLOT_TIMEOUT = float(os.environ.get("MC_SLOT_TIMEOUT", "10"))
 
 _SIM_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT)
 
-# Form models offered (the engine also knows these); local pricing only.
-MODELS = ["bootstrap", "block", "lognormal"]
+# Equity-return sample offered (the engine also knows these); local pricing only.
+MODELS = ["us", "global", "postwar"]
 GENDERS = ["M", "F"]
 STATES = sorted(annuity_quote.STATES)
 
 # Defaults shown on a fresh form (mirrors the desktop GUI).
 DEFAULTS = {
-    "amount": "1,000,000", "sims": "5000", "age": "65", "years": "30",
-    "gender": "M", "model": "block", "state": "FL", "block_length": "5",
-    "joint_age": "", "joint_gender": "", "upper_bound": "", "lower_bound": "",
-    "seed": "", "inflation": "",
+    "amount": "1,000,000", "sims": "5000", "age": "65", "years": "35",
+    "gender": "M", "model": "global", "state": "FL", "block_length": "5",
+    "joint_age": "65", "joint_gender": "F", "upper_bound": "1.5",
+    "lower_bound": "", "seed": "", "inflation": "",
     "interest": str(mc.rate_model.DEFAULT_INITIAL_RATE),
-    "dynamic": "on", "improvement": "on",
+    "dynamic": "", "improvement": "on",
 }
 
 app = Flask(__name__)
@@ -177,7 +178,7 @@ def parse_form(form) -> dict:
     if not 1 <= block_length <= MAX_BLOCK_LENGTH:
         raise FormError(f"Block length must be between 1 and {MAX_BLOCK_LENGTH}.")
 
-    model = form.get("model", "bootstrap")
+    model = form.get("model", "global")
     if model not in MODELS:
         raise FormError(f"Model must be one of {', '.join(MODELS)}.")
 
@@ -190,6 +191,9 @@ def parse_form(form) -> dict:
 
     improvement = bool(_opt(form, "improvement"))
     dynamic = bool(_opt(form, "dynamic"))
+    if dynamic and model != "us":
+        raise FormError("Dynamic inflation + rate is only available with the "
+                        "United States return sample.")
 
     upper = _float_field(form, "upper_bound", None) if _opt(form, "upper_bound") else None
     lower = _float_field(form, "lower_bound", None) if _opt(form, "lower_bound") else None
@@ -294,7 +298,16 @@ def run():
             states=STATES, report=None, params_line=None, error=str(exc),
             hidden=None, max_sims=MAX_SIMS, max_years=MAX_YEARS), 400
 
-    report_text, _csv_kwargs, report_data = _simulate(params)
+    try:
+        report_text, _csv_kwargs, report_data = _simulate(params)
+    except _GlobalDataMissing:
+        return render_template(
+            "index.html", values=request.form, models=MODELS, genders=GENDERS,
+            states=STATES, report=None, params_line=None,
+            error="The global developed-markets dataset is not installed on "
+                  "this server yet. Choose the 'us' sample, or ask the operator "
+                  "to run fetch_global_data.py.",
+            hidden=None, max_sims=MAX_SIMS, max_years=MAX_YEARS), 503
     return render_template(
         "index.html", values=request.form, models=MODELS, genders=GENDERS,
         states=STATES, report=report_text,

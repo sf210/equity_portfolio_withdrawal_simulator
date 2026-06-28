@@ -7,29 +7,37 @@
 The annuity-withdrawal projection needs, for each future year, BOTH a nominal
 equity return (to grow the account) and an inflation rate (to express results in
 today's dollars). Because equity returns and inflation are correlated, they must
-be drawn *jointly* rather than independently. Two modes are provided:
+be drawn *jointly* rather than independently, so a sampled year carries both.
 
-  "bootstrap"  (default) -- resample actual historical year-pairs with
-                replacement (IID). Preserves the empirical distribution: fat left
-                tail, skew, and the exact contemporaneous equity/inflation
-                correlation. Recommended for retirement risk work (Pfau 2010:
-                normal-based MC overstates safe withdrawal rates vs. bootstrap).
+Sampling is always a **circular block bootstrap**: resample consecutive runs of
+`block_length` years (default 5) and stitch them together. Versus IID sampling
+this preserves *serial* correlation -- momentum/mean reversion and multi-year
+runs of high or low inflation -- which widens the left tail of multi-year
+outcomes (Pfau 2010). Two data sources are offered:
 
-  "block"      -- moving/circular block bootstrap: resample consecutive runs of
-                `block_length` years (default 5) and stitch them together. Unlike
-                IID bootstrap it preserves *serial* correlation -- momentum and
-                mean reversion, and multi-year runs of high/low inflation -- which
-                widens the left tail of multi-year outcomes. Blocks wrap around
-                the end of the series so every start year is equally likely.
+  "us"      -- the US series only (S&P 500 total return + CPI, market_data.py).
 
-  "lognormal"  -- fit a *bivariate* normal to (log(1+equity), log(1+inflation))
-                and draw from it. Smooth and extrapolates beyond observed values,
-                but has zero skew/kurtosis so it understates tail risk. The
-                fitted covariance still reproduces the historical correlation.
+  "global"  -- a broad sample of developed markets (global_market_data.py, from
+               the Jordà-Schularick-Taylor Macrohistory Database). The US has
+               been an ex post outlier; a forward-looking distribution is better
+               drawn from many markets (Anarkulova, Cederburg, O'Doherty & Sias
+               2023). Each block is drawn from a single country (countries chosen
+               in proportion to their number of years), so within-country
+               sequence risk is preserved while the cross-section of national
+               outcomes -- including the severe ones the US never saw -- enters
+               the distribution. Requires the JST-derived data file; see
+               global_market_data.py / fetch_global_data.py.
 
-All expose the same interface:
+  "postwar" -- the same broad developed-market sample restricted to 1950 and
+               later. Rationale: the post-WWII global order (Bretton Woods, no
+               great-power war among developed economies, modern central banking)
+               is arguably a better guide to the future than the 1870-1945 era of
+               world wars and hyperinflations. Trades a longer history for a more
+               regime-relevant one.
 
-    model = JointReturnModel("block", block_length=5)
+Interface:
+
+    model = JointReturnModel("global", block_length=5)
     equity, infl = model.sample_path(years=30, rng=np.random.default_rng(0))
 
 returning two length-`years` numpy arrays of decimal fractions.
@@ -41,59 +49,91 @@ import numpy as np
 
 import market_data
 
+MODES = ("us", "global", "postwar")
+
+# First year included by the post-WWII sample.
+POSTWAR_MIN_YEAR = 1950
+
 
 class JointReturnModel:
-    def __init__(self, mode: str = "bootstrap", block_length: int = 5):
-        if mode not in ("bootstrap", "block", "lognormal"):
-            raise ValueError(
-                f"unknown mode {mode!r}; use 'bootstrap', 'block', or 'lognormal'"
-            )
+    def __init__(self, mode: str = "us", block_length: int = 5):
+        if mode not in MODES:
+            raise ValueError(f"unknown mode {mode!r}; use {', '.join(MODES)}")
         if block_length < 1:
             raise ValueError("block_length must be >= 1")
         self.mode = mode
         self.block_length = block_length
-        self.equity = np.asarray(market_data.equity_returns(), dtype=float)
-        self.inflation = np.asarray(market_data.inflation_rates(), dtype=float)
 
-        # Log-space stats, used by the lognormal mode and reported by summary().
-        self._log = np.column_stack(
-            [np.log1p(self.equity), np.log1p(self.inflation)]
-        )
-        self._log_mean = self._log.mean(axis=0)
-        self._log_cov = np.cov(self._log, rowvar=False)
+        # `_series`: list of per-country (n, 2) arrays of [equity_frac, infl_frac].
+        # The US source is just the single-country case.
+        if mode == "us":
+            eq = np.asarray(market_data.equity_returns(), dtype=float)
+            infl = np.asarray(market_data.inflation_rates(), dtype=float)
+            self._series = [np.column_stack([eq, infl])]
+            self._span = f"{market_data.YEARS[0]}-{market_data.YEARS[-1]}"
+            self._source = "US S&P 500 / CPI"
+        else:  # "global" or "postwar": broad developed-market sample.
+            import global_market_data
+            min_year = POSTWAR_MIN_YEAR if mode == "postwar" else None
+            gm = global_market_data.load(min_year=min_year)
+            self._series = [arr for _name, arr in gm["series"]]
+            self._span = f"{gm['year_min']}-{gm['year_max']}"
+            era = "post-WWII " if mode == "postwar" else ""
+            self._source = (f"{era}global developed markets, "
+                            f"{gm['n_countries']} countries (JST)")
+
+        lengths = np.array([len(a) for a in self._series], dtype=float)
+        self._weights = lengths / lengths.sum()
+        # Pooled observations, used only for summary() statistics.
+        self._pooled = np.concatenate(self._series, axis=0)
 
     def sample_path(self, years: int, rng: np.random.Generator):
         """Return (equity_returns, inflation_rates), each a length-`years` array."""
-        n = self.equity.size
-        if self.mode == "bootstrap":
-            idx = rng.integers(0, n, size=years)
-        elif self.mode == "block":
-            # Circular block bootstrap: draw enough blocks to cover `years`, each
-            # a run of `block_length` consecutive (wrap-around) historical years.
-            L = self.block_length
-            n_blocks = -(-years // L)  # ceil division
+        L = self.block_length
+        n_blocks = -(-years // L)  # ceil division
+
+        if len(self._series) == 1:
+            # Single series: vectorised circular block bootstrap.
+            arr = self._series[0]
+            n = len(arr)
             starts = rng.integers(0, n, size=n_blocks)
             offsets = np.arange(L)
             idx = ((starts[:, None] + offsets[None, :]) % n).ravel()[:years]
-        else:  # lognormal: bivariate-normal log-returns, converted to fractions.
-            draws = rng.multivariate_normal(self._log_mean, self._log_cov, size=years)
-            return np.expm1(draws[:, 0]), np.expm1(draws[:, 1])
-        return self.equity[idx], self.inflation[idx]
+            out = arr[idx]
+        else:
+            # Each block comes from one country (chosen in proportion to its
+            # length), so blocks never stitch across countries.
+            chosen = rng.choice(len(self._series), size=n_blocks, p=self._weights)
+            offsets = np.arange(L)
+            pieces = []
+            for ci in chosen:
+                a = self._series[ci]
+                m = len(a)
+                s = int(rng.integers(0, m))
+                pieces.append(a[(s + offsets) % m])
+            out = np.concatenate(pieces, axis=0)[:years]
+
+        return out[:, 0], out[:, 1]
 
     def summary(self) -> str:
-        """Human-readable description of the calibrated distribution."""
-        eq, infl = self.equity, self.inflation
-        corr = np.corrcoef(eq, infl)[0, 1]
-        # Geometric (compound) mean of equity over the full sample.
-        geo = np.exp(np.log1p(eq).mean()) - 1
-        label = self.mode
-        if self.mode == "block":
-            label = f"block(len={self.block_length})"
+        """Human-readable description of the calibrated distribution.
+
+        Statistics are reported in REAL terms -- (1+equity)/(1+inflation)-1 -- so
+        they are comparable across countries and robust to hyperinflation years
+        (e.g. Germany 1923), whose huge nominal equity/CPI figures would otherwise
+        dominate the nominal moments. The simulation deflates to today's dollars,
+        so the real distribution is what drives outcomes anyway.
+        """
+        eq = self._pooled[:, 0]
+        infl = self._pooled[:, 1]
+        real = (1.0 + eq) / (1.0 + infl) - 1.0
+        geo = np.exp(np.log1p(real).mean()) - 1  # compound real mean
         return (
-            f"model={label}  n_years={eq.size} ({market_data.YEARS[0]}-"
-            f"{market_data.YEARS[-1]})\n"
-            f"  equity: arith mean {eq.mean():6.2%}  geo mean {geo:6.2%}  "
-            f"std {eq.std(ddof=1):6.2%}\n"
-            f"  CPI   : arith mean {infl.mean():6.2%}  std {infl.std(ddof=1):6.2%}\n"
-            f"  corr(equity, inflation) = {corr:+.3f}"
+            f"model={self.mode} block(len={self.block_length})  "
+            f"source={self._source}\n"
+            f"  n_obs={eq.size} ({self._span})\n"
+            f"  equity (real): arith mean {real.mean():6.2%}  "
+            f"geo mean {geo:6.2%}  std {real.std(ddof=1):6.2%}  "
+            f"min {real.min():6.1%}\n"
+            f"  CPI inflation: median {np.median(infl):6.2%}"
         )
