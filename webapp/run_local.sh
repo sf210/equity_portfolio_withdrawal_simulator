@@ -5,10 +5,11 @@
 #
 # Serves with gunicorn (robust) at http://127.0.0.1:PORT. Press Ctrl-C to stop.
 # Frees the port first in case a previous instance is still holding it.
-set -euo pipefail
+set -eu
 
 # Repo root = the directory containing this script's parent (webapp/..).
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Use $0 (not BASH_SOURCE) so this also works under plain `sh`.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${1:-5000}"
 GUNICORN="$ROOT/.venv/bin/gunicorn"
 
