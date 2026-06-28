@@ -301,8 +301,8 @@ def _money(v: float) -> str:
     return f"${v:,.0f}"
 
 
-def _pct(frac: float) -> str:
-    return f"{frac * 100:,.0f}%"
+def _pct(frac: float, decimals: int = 0) -> str:
+    return f"{frac * 100:,.{decimals}f}%"
 
 
 def _pcts(arr) -> list:
@@ -312,25 +312,27 @@ def _pcts(arr) -> list:
 def _summary(data: dict) -> dict:
     """Portfolio summary split into a real section and a nominal section."""
     eq, infl = data["equities"], data["inflations"]
-    total_nom = np.prod(1.0 + eq, axis=1) - 1.0
-    total_real = np.prod((1.0 + eq) / (1.0 + infl), axis=1) - 1.0
+    n_years = eq.shape[1]
+    total_nom = np.prod(1.0 + eq, axis=1) ** (1.0 / n_years) - 1.0
+    total_real = np.prod((1.0 + eq) / (1.0 + infl), axis=1) ** (1.0 / n_years) - 1.0
     wd_nom = data["payouts_nominal"].mean(axis=1)
     wd_real = data["payouts_real"].mean(axis=1)
 
     def money_row(label, arr):
         return {"label": label, "cells": [_money(v) for v in _pcts(arr)]}
 
-    def pct_row(label, arr):
-        return {"label": label, "cells": [_pct(v) for v in _pcts(arr)]}
+    def pct_row(label, arr, decimals=0):
+        return {"label": label,
+                "cells": [_pct(v, decimals) for v in _pcts(arr)]}
 
     real_rows = [
         money_row("Ending balance", data["end_real"]),
-        pct_row("Total return (cumulative)", total_real),
+        pct_row("Total return (geo mean)", total_real, decimals=1),
         money_row("Mean annual withdrawal", wd_real),
     ]
     nominal_rows = [
         money_row("Ending balance", data["end_nom"]),
-        pct_row("Total return (cumulative)", total_nom),
+        pct_row("Total return (geo mean)", total_nom, decimals=1),
         money_row("Mean annual withdrawal", wd_nom),
     ]
     worst = {"one_yr": _pct(data["worst_1yr"]),
