@@ -24,45 +24,162 @@ Pricing (per-year annuity payout):
     SOA 2012 IAM tables ──> annuity_pricing.py   (local, default)
     immediateannuities.com ──> annuity_quote.py  (optional: --quotes site)
 
-Scenarios:
-    market_data.py ──> equity_model.py  (equity + inflation, 1928–2025)
+Scenarios (equity + inflation):
+    market_data.py         ──┐   US, 1928–2025
+    global_market_data.py  ──┴─> equity_model.py   global/postwar, 1871–2020 (JST)
 
 Simulation:
     withdrawal_projection.py  (one path)  ──>  montecarlo.py  (many paths + CIs)
 ```
 
-## 2. The equity and inflation scenario model
+## 2. The inputs, option by option
+
+Every input below appears in the desktop GUI, the web form, and as a
+command-line flag. This section explains **what each does and why it is there**;
+later sections give the underlying math. Defaults shown are the GUI/web defaults.
+
+### 2.1 Who, and how much
+
+- **Amount** *(default \$1,000,000)* — the starting invested balance, in today's
+  dollars. Outcomes scale almost linearly with it, so it mainly sets the units.
+- **Age** *(default 65)* and **Gender** *(default M)* — the primary annuitant.
+  These select the mortality table used to price the payout (Section 4): an older
+  age implies fewer expected remaining years, so the annuity-equivalent payout
+  *rate* is higher. Allowed ages are 40–90.
+- **Joint age** / **Joint gender** *(default 65 / F)* — an optional second life.
+  When both are given the payout is priced as a **last-survivor** annuity, which
+  pays while *either* person is alive. Because a couple's combined lifespan is
+  longer than one person's, the payout rate is **lower** — more conservative
+  spending — than for a single life. Leave both blank for a single-life
+  projection; the default models a 65-year-old couple.
+- **State** — used only with live **site** quotes, where insurer payouts vary by
+  state of residence. Under the default local pricing it is ignored (use any
+  value, or `OTHER`).
+
+### 2.2 How long, and how many
+
+- **Years** *(default 35)* — the projection horizon. 35 years reflects planning
+  to roughly age 100 for a 65-year-old, i.e. provisioning for **longevity** rather
+  than just life expectancy.
+- **Sims** *(default 5,000)* — the number of independent random paths. More
+  simulations give smoother, more stable percentiles at the cost of run time.
+- **Seed** *(default blank)* — the random-number seed. Blank draws fresh each run;
+  setting an integer reproduces an identical run, which is useful for comparing
+  one changed input at a time.
+
+### 2.3 The return scenario
+
+- **Model** *(default global)* — which historical return **sample** to draw from:
+  **us**, **global**, or **postwar** (Section 3). In short, the US has been an
+  outlier, so **global** and **postwar** give a more cautious,
+  internationally-grounded picture of the future.
+- **Block length** *(default 5 years)* — the length of each resampled run of
+  consecutive years. It controls how much **sequence risk** — multi-year runs of
+  good or bad markets, and persistent inflation — is carried into each path. A
+  length of 1 is an IID resample with no persistence; larger blocks impose more.
+
+### 2.4 Spending guardrails (upper and lower bounds)
+
+The annuity-equivalent rule re-prices the payout on the *current* balance every
+year, so spending naturally rises after good markets and falls after bad ones.
+Two optional factors clamp that, expressed as multiples of **year 1's withdrawal
+in today's dollars**:
+
+- **Upper bound** *(default 1.5)* — the maximum factor. It **caps** spending so
+  that, even after a strong market run, you never withdraw more than 1.5× your
+  first-year amount in real terms. Its purpose is to **preserve capital when the
+  market does very well** rather than ratcheting consumption up with every gain —
+  leaving more invested for later years and for a bequest. Without a cap, a few
+  good early years pull both spending and depletion risk up sharply.
+- **Lower bound** *(default blank)* — the minimum factor. It **floors** spending
+  so that, even as the balance shrinks, withdrawals don't fall below this multiple
+  of the first-year amount, maintaining a minimum standard of living. The
+  trade-off is that withdrawing more than the balance can support **accelerates
+  depletion**, so a floor raises the chance of running the account to zero.
+
+Both clamp the **cash actually withdrawn**, so the effect feeds back into the
+surviving balance (Section 5). Leaving a bound blank disables it.
+
+### 2.5 Pricing the payout
+
+- **Quotes** *(default local)* — how the payout is priced: **local** uses the
+  offline SOA mortality-table model (Section 4); **site** fetches a live quote
+  from immediateannuities.com. Local is the default and is what the web app uses;
+  site requires network access and a valid **State**.
+- **Interest rate** *(default 4.3%)* — the discount rate used to price the payout
+  in local mode (Section 4.2). A higher rate raises the payout, and thus the
+  withdrawal. In constant-inflation mode it is fixed for the whole projection; in
+  dynamic mode it is the *starting* rate (Section 8). It has no effect under
+  **site** quotes.
+- **Scale G2 mortality improvement** *(default on; local only)* — projects the
+  2012 base mortality forward for expected future gains in longevity
+  (Section 4.3). Because people are assumed to live longer, the payout rate is
+  **lower** (more conservative).
+
+### 2.6 Inflation handling
+
+- **Inflation** *(default blank)* — in constant mode, the single assumed annual
+  CPI rate used to express results in today's dollars (Section 3.1). Real
+  (today's-dollar) outcomes are essentially **invariant** to this number, because
+  each sampled year's return is restated onto the chosen basis; it mainly affects
+  the *nominal*-dollar figures. A blank reads as 0%, and it is ignored in dynamic
+  mode (which samples its own inflation).
+- **Dynamic inflation + rate** *(default off; `us` sample + local only)* — instead
+  of a constant assumption, each path uses its own sampled inflation and a
+  discount rate that evolves with it (Section 8). It is restricted to the **us**
+  sample because the rate model is calibrated on US data; it is disabled for the
+  global/postwar samples.
+
+## 3. The equity and inflation scenario model
 
 Each projected year needs a **nominal equity return** (to grow the account) and
 an **inflation rate** (to express results in today's dollars). Because equity
 returns and inflation are correlated, they are drawn **jointly** rather than
-independently. The models are calibrated to paired annual data for **1928–2025**
-(98 years):
+independently — a sampled year always carries both numbers together.
 
-- **S&P 500 nominal total return** (dividends reinvested), from Damodaran / NYU
-  Stern [4].
-- **CPI-U annual-average inflation** (U.S. Bureau of Labor Statistics, via
-  usinflationcalculator.com) [5].
+**Data sources.** Two paired annual datasets are available:
 
-Three scenario generators are available (`equity_model.py`):
+- **United States, 1928–2025** (98 years): S&P 500 nominal total return
+  (dividends reinvested), from Damodaran / NYU Stern [4], paired with CPI-U
+  annual-average inflation [5]. (`market_data.py`)
+- **Broad developed markets, 1871–2020** (16 countries that have equity data;
+  ~2,260 country-years): per-country nominal equity total return and CPI
+  inflation from the **Jordà–Schularick–Taylor Macrohistory Database** [14]
+  (`global_market_data.py`). The US has been an *ex post* outlier among developed
+  markets — its realised returns sit near the top of the cross-section and its
+  worst drawdowns are mild next to the war- and hyperinflation-era losses other
+  countries suffered — so a forward-looking distribution is arguably better drawn
+  from many markets than from the US alone [15].
 
-- **Bootstrap** (default) — resample actual historical year-pairs with
-  replacement (IID). Preserves the empirical distribution: fat left tail, skew,
-  and the contemporaneous equity/inflation correlation. Historical resampling is
-  preferred over normal-based Monte Carlo for retirement risk work, because the
-  normal assumption understates tail risk and overstates safe withdrawal rates
-  [1, 2].
-- **Block** — circular block bootstrap [3]: resample consecutive runs of
-  `block_length` years (default 5) and stitch them together, wrapping around the
-  end of the series. Unlike the IID bootstrap this preserves **serial
-  correlation** — momentum, mean reversion, and the multi-year persistence of
-  inflation — which widens the left tail of multi-year outcomes.
-- **Lognormal** — fit a bivariate normal to `(log(1+equity), log(1+inflation))`
-  and draw from it. Smooth and able to extrapolate, but has zero skew/kurtosis
-  and so understates tail risk; the fitted covariance still reproduces the
-  historical correlation.
+**Sampling.** All samples use a **circular block bootstrap** [3]: consecutive
+runs of `block_length` years (default 5) are resampled and stitched together,
+wrapping around the series end. Versus an IID resample this preserves **serial
+correlation** — momentum, mean reversion, and multi-year runs of high or low
+inflation — which is what makes *sequence-of-returns* risk show up and which
+widens the left tail of multi-year outcomes. (Historical resampling is preferred
+over normal-based Monte Carlo for retirement risk work, which understates tail
+risk and overstates safe withdrawal rates [1, 2].) For the multi-country samples
+each block is drawn from a **single country** (countries weighted by their number
+of years), so within-country sequence risk is preserved while the cross-section
+of national outcomes enters the distribution.
 
-### 2.1 Two inflation modes
+Three return **samples** are offered (`equity_model.py`, the "Model" input):
+
+- **us** — the US series alone (1928–2025).
+- **global** — the full broad developed-market sample (1871–2020). The most
+  cautious: it includes catastrophic equity outcomes the US never experienced
+  (e.g. Germany and Japan around WWII, with real one-year losses near −90%).
+- **postwar** — the same broad sample restricted to **1950 and later**. The
+  rationale is that the post-WWII global order (Bretton Woods and its successors,
+  no great-power war among developed economies, modern independent central
+  banking) is a more relevant guide to the future than the 1870–1945 era of world
+  wars and hyperinflations. It sits between **us** and **global** — broader than
+  the US, but without the pre-war disasters.
+
+Each report prints summary statistics for the chosen sample (in **real** terms,
+so hyperinflation years do not distort them).
+
+### 3.1 Two inflation modes
 
 The simulator supports two ways of handling inflation:
 
@@ -85,15 +202,20 @@ The simulator supports two ways of handling inflation:
   persistence is preserved), it deflates results to today's dollars, **and** it
   drives an evolving annuity discount rate. Equity is used as drawn (no
   restatement), so the historical equity/inflation pairing stays intact.
-  Section 7 specifies and estimates this mode.
+  Section 8 specifies and estimates this mode. Dynamic mode is available **only
+  with the `us` sample** (and local pricing): the discount-rate model is
+  calibrated on US data, so evolving it from a foreign — possibly hyperinflation —
+  inflation path is not meaningful. The `global` and `postwar` samples therefore
+  always use the constant-inflation mode (their results are real, and real
+  outcomes are invariant to the constant chosen).
 
-## 3. Annuity pricing (local SOA-table model)
+## 4. Annuity pricing (local SOA-table model)
 
 By default the per-year payout is priced **offline** from published mortality
 tables (`annuity_pricing.py`); live quotes from immediateannuities.com [6] are an
 opt-in alternative (`--quotes site`).
 
-### 3.1 Mortality tables
+### 4.1 Mortality tables
 
 The base mortality is the **Society of Actuaries 2012 Individual Annuity
 Mortality (IAM) Basic Table**, by sex, age-nearest-birthday [7]:
@@ -108,7 +230,7 @@ Projection Scale G2** [7]:
 - `soa_mortality_2583.csv` — *Projection Scale G2 – Male, ANB* (ages 0–105)
 - `soa_mortality_2584.csv` — *Projection Scale G2 – Female, ANB* (ages 0–105)
 
-### 3.2 Actuarial present value
+### 4.2 Actuarial present value
 
 With a flat interest rate `i` and survival probabilities `tpx` (the probability a
 life now aged `x` survives `t` years, built from the table's one-year mortality
@@ -138,7 +260,7 @@ where `a_xy` (both alive) uses the product of the two independent survival
 curves, with the same +11/24 monthly adjustment. The table's top age (120) is
 treated as certain death, so the survival curve terminates cleanly.
 
-### 3.3 Mortality improvement (Scale G2)
+### 4.3 Mortality improvement (Scale G2)
 
 With `--improvement`, the 2012 base rates are projected forward **generationally**
 to the quote year [7]:
@@ -152,22 +274,22 @@ applied as each cohort ages, so the calendar year at attained age `a` is
 *lowers* the payout. (Scale G2 grades to zero by its terminal age; attained ages
 beyond it receive no further improvement.)
 
-### 3.4 Calibration against the market
+### 4.4 Calibration against the market
 
 The model carries **no insurer expense, profit, or interest-rate load**, so it is
 a clean actuarial benchmark rather than a marketed quote. Compared against live
 immediateannuities.com quotes [6] for ages 60/65/70/80, the model pays roughly
 **80–94%** of the site at the default 3.5% interest, and **matches the site at
 about 5%** interest. That ~5% is consistent with a current 10-year nominal yield
-of roughly a 2.3% real rate plus ~2.5% inflation (Section 7).
+of roughly a 2.3% real rate plus ~2.5% inflation (Section 8).
 
-## 4. The withdrawal mechanism (one path)
+## 5. The withdrawal mechanism (one path)
 
 Starting from the invested `amount`, for each projected year
 (`withdrawal_projection.py`):
 
 1. Price the monthly annuity payout per dollar at the current age and balance
-   (Section 3); the payout is linear in premium, so one rate per age is computed
+   (Section 4); the payout is linear in premium, so one rate per age is computed
    and scaled.
 2. Withdraw **12 ×** that monthly payout from the balance.
 3. Grow the remaining balance by that year's nominal equity return.
@@ -178,7 +300,7 @@ Optional `--upper-bound` / `--lower-bound` cap and floor the annual withdrawal
 floor at 0.5×); the clamp is applied to the cash actually withdrawn, so it feeds
 back into the surviving balance.
 
-## 5. Monte Carlo aggregation
+## 6. Monte Carlo aggregation
 
 `montecarlo.py` runs many independent paths (default **5,000**) and summarizes
 the distribution:
@@ -191,13 +313,16 @@ the distribution:
 - **Downside**: the share of paths whose real ending balance finishes below the
   starting amount, and below half of it.
 - **Worst real returns**: the worst single-year and worst cumulative five-year
-  *real* (inflation-adjusted) equity total return seen anywhere in the run.
+  *real* (inflation-adjusted) equity total return seen anywhere in the run. This
+  is the **market** return itself, before any withdrawal — not the change in the
+  account balance, which falls by more in a down year because spending is also
+  taken out.
 
 The annuity-rate cache is built once per run and reused across all paths, so
 pricing cost (and any network traffic) stays at roughly one rate per age
 regardless of the number of simulations.
 
-## 6. Key assumptions and caveats
+## 7. Key assumptions and caveats
 
 - This models withdrawing the annuity-*equivalent* amount while staying invested.
   It is **not** an annuity purchase — no mortality pooling, no income guarantee.
@@ -212,7 +337,7 @@ regardless of the number of simulations.
 - Mortality follows population-level annuitant tables; no individual health
   underwriting is performed.
 
-## 7. Dynamic inflation and interest rates
+## 8. Dynamic inflation and interest rates
 
 The dynamic mode (`--dynamic-rates`, `rate_model.py`) makes inflation vary year
 to year and ties the annuity discount rate to it, so a higher-inflation path
@@ -221,10 +346,10 @@ inflation and bond yields are persistent, correlated time series, the discount
 rate is modelled with **lagged** dependence rather than as a static function of
 the current year's inflation.
 
-### 7.1 Specification
+### 8.1 Specification
 
 The design is **layered**: inflation keeps coming from the block bootstrap of
-Section 2 (which already preserves its serial persistence and its pairing with
+Section 3 (which already preserves its serial persistence and its pairing with
 equity), and only the interest rate is added as a parametric process. The rate
 partially adjusts each year toward a long-run **Fisher target** driven by the
 *previous* year's inflation:
@@ -240,9 +365,9 @@ the prior year's rate (weight `1 − λ`) and the prior year's inflation. Year 1
 priced at a given initial ("today's") rate `i₀` (`--initial-rate`, default 4.3% ≈
 the current 10-year yield); the rate is floored at zero. The interest innovation
 is drawn independently of the equity/inflation draws — a deliberate
-simplification (see §7.5).
+simplification (see §8.5).
 
-### 7.2 Estimation
+### 8.2 Estimation
 
 The model is fit as the reduced form
 
@@ -289,7 +414,7 @@ autocorrelation — the lagged specification has absorbed the dynamics.
 
 ![Exhibit 3: residual distribution](doc_resid_hist.png)
 
-### 7.3 Implied dynamics
+### 8.3 Implied dynamics
 
 The estimates have a clear economic reading:
 
@@ -297,10 +422,10 @@ The estimates have a clear economic reading:
   tax-augmented (Darby) form of the Fisher hypothesis.
 - **Adjustment speed `λ ≈ 0.165`** is *small*: only about one-sixth of the gap to
   the Fisher target closes each year. This is the sluggish short-run pass-through
-  (the Mundell–Tobin / "Fisher puzzle" effect, §7.4).
+  (the Mundell–Tobin / "Fisher puzzle" effect, §8.4).
 - The **long-run real rate is ≈ `a` = 1.7%**, and the steady-state nominal rate at
   2.5% inflation is `a + b·2.5% ≈ 4.5%` — close to both the current 10-year yield
-  and the ~5% that reproduces live annuity quotes (§3.4).
+  and the ~5% that reproduces live annuity quotes (§4.4).
 
 Crucially, because `λ` is small, when inflation jumps the rate lags and the
 **implied real rate `i_t − π_t` compresses and can go temporarily negative**,
@@ -310,7 +435,7 @@ deterministic inflation spike.
 
 ![Exhibit 4: rate lags an inflation spike; the real rate dips negative](doc_rate_illustration.png)
 
-### 7.4 Research basis
+### 8.4 Research basis
 
 The specification follows established findings on the yield/inflation link:
 
@@ -332,7 +457,7 @@ The specification follows established findings on the yield/inflation link:
   behavior endogenously while remaining mean-reverting, so it cannot drift to
   implausible levels over a long horizon.
 
-### 7.5 Usage and caveats
+### 8.5 Usage and caveats
 
 Enable with `--dynamic-rates` (local pricing only); set the starting rate with
 `--initial-rate`. Caveats specific to this mode:
@@ -386,3 +511,12 @@ Enable with `--dynamic-rates` (local pricing only); set the starting rate with
     https://www.aei.org/economics/treasury-yields-inflation-and-real-interest-rates-analyzing-the-historical-record/
 13. *New 10-Year TIPS Gets Real Yield of −0.93%, Lowest in History.* Seeking
     Alpha (July 2020).
+14. Jordà, Ò., Knoll, K., Kuvshinov, D., Schularick, M., & Taylor, A. M. (2019).
+    *The Rate of Return on Everything, 1870–2015.* Quarterly Journal of
+    Economics, 134(3), 1225–1298. Data: **Jordà–Schularick–Taylor Macrohistory
+    Database** (macrohistory.net), release R6; see also Jordà, Schularick &
+    Taylor (2017), *Macrofinancial History and the New Business Cycle Facts.*
+    Used under CC BY-NC-SA 4.0.
+15. Anarkulova, A., Cederburg, S., O'Doherty, M. S., & Sias, R. (2023). *The Safe
+    Withdrawal Rate: Evidence from a Broad Sample of Developed Markets.* Working
+    paper (SSRN 4227132).

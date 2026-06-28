@@ -15,7 +15,7 @@ montecarlo \- Monte Carlo confidence intervals for annuity-equivalent withdrawal
 .RB [ --inflation
 .IR RATE ]
 .RB [ --model
-.IR bootstrap|block|lognormal ]
+.IR us|global|postwar ]
 .RB [ --block-length
 .IR YEARS ]
 .RB [ --quotes
@@ -119,12 +119,15 @@ Constant annual inflation rate as a decimal fraction (e.g. \fB0.025\fR for
 2.5%). Used to deflate results to today's dollars and to restate equity returns.
 Default \fB0.025\fR.
 .TP
-.BI --model " bootstrap|block|lognormal"
-Equity return model (see \fBwithdrawal_projection\fR(1) for details).
-Default \fBbootstrap\fR.
+.BI --model " us|global|postwar"
+Historical return sample, block-bootstrapped (see \fBwithdrawal_projection\fR(1)
+for details): \fBus\fR (S&P 500 / CPI, 1928\(en2025), \fBglobal\fR (broad
+developed markets, JST, 1871\(en2020), or \fBpostwar\fR (the global sample from
+1950 on). The global/postwar samples require the JST data file (see
+\fBfetch_global_data.py\fR). Default \fBglobal\fR.
 .TP
 .BI --block-length " YEARS"
-Block size in years, used only with \fB--model block\fR. Default \fB5\fR.
+Block size in years for the block bootstrap. Default \fB5\fR.
 .TP
 .BI --quotes " local|site"
 Annuity pricing source. \fBlocal\fR (default) prices from the SOA mortality
@@ -149,8 +152,8 @@ year.
 Dynamic mode: each path's per-year sampled inflation drives both the deflator and
 an annuity discount rate that evolves with it (error-correction model in
 \fBrate_model.py\fR), so higher-inflation paths get higher yields and larger
-nominal payouts. Requires \fB--quotes local\fR; ignores \fB--inflation\fR and
-\fB--interest\fR.
+nominal payouts. Requires \fB--model us\fR and \fB--quotes local\fR (the rate
+model is US-calibrated); ignores \fB--inflation\fR and \fB--interest\fR.
 .TP
 .BI --initial-rate " RATE"
 Starting 10-year rate the dynamic paths begin from, as a decimal fraction. Used
@@ -256,19 +259,19 @@ python montecarlo.py 1000000 65 M FL --interest 0.04 --improvement
 .fi
 .RE
 .PP
-Dynamic inflation with a discount rate that tracks it:
+US sample with dynamic inflation and a discount rate that tracks it:
 .PP
 .RS
 .nf
-python montecarlo.py 1000000 65 M FL --dynamic-rates --model block
+python montecarlo.py 1000000 65 M FL --model us --dynamic-rates
 .fi
 .RE
 .PP
-2000 paths with live site quotes, the block bootstrap, and a fixed seed:
+2000 paths with the post-WWII global sample and a fixed seed:
 .PP
 .RS
 .nf
-python montecarlo.py 1000000 65 M FL --quotes site --sims 2000 --model block --seed 1
+python montecarlo.py 1000000 65 M FL --model postwar --sims 2000 --seed 1
 .fi
 .RE
 .PP
@@ -309,10 +312,14 @@ Dynamic discount-rate model used by \fB--dynamic-rates\fR (fit to FRED GS10
 yields and CPI; see \fBfit_rate_model.py\fR and \fBFIT.pdf\fR).
 .TP
 .B equity_model.py
-The equity-return / inflation models.
+The block-bootstrap equity-return / inflation sampler (us/global/postwar).
 .TP
 .B market_data.py
-Embedded historical S&P 500 returns and CPI inflation, 1928\(en2025.
+Embedded historical US S&P 500 returns and CPI inflation, 1928\(en2025.
+.TP
+.B global_market_data.py
+Broad developed-market returns (JST) for the global/postwar samples; reads the
+\fBfetch_global_data.py\fR-derived data file.
 .SH ENVIRONMENT
 Run with the project virtualenv, which provides NumPy:
 .B ~/finance/planning/.venv/bin/python.

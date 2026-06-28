@@ -13,7 +13,7 @@ withdrawal_projection \- project annuity-equivalent withdrawals from an equity-i
 .RB [ --inflation
 .IR RATE ]
 .RB [ --model
-.IR bootstrap|block|lognormal ]
+.IR us|global|postwar ]
 .RB [ --block-length
 .IR YEARS ]
 .RB [ --quotes
@@ -122,11 +122,12 @@ Constant annual inflation rate as a decimal fraction (e.g. \fB0.025\fR for
 2.5%). Used only to deflate results to today's dollars and to restate equity
 returns onto a constant-inflation basis. Default \fB0.025\fR.
 .TP
-.BI --model " bootstrap|block|lognormal"
-Equity return model (see \fBMODELS\fR). Default \fBbootstrap\fR.
+.BI --model " us|global|postwar"
+Historical return sample, block-bootstrapped (see \fBMODELS\fR).
+Default \fBglobal\fR.
 .TP
 .BI --block-length " YEARS"
-Block size in years, used only with \fB--model block\fR. Default \fB5\fR.
+Block size in years for the block bootstrap. Default \fB5\fR.
 .TP
 .BI --quotes " local|site"
 Annuity pricing source. \fBlocal\fR (default) prices from the SOA mortality
@@ -152,8 +153,9 @@ Use the per-year sampled inflation directly (instead of the constant
 \fB--inflation\fR, and with no equity restatement) and evolve the annuity
 discount rate with it via the error-correction model in \fBrate_model.py\fR, so a
 higher-inflation path produces higher yields and larger nominal payouts. Requires
-\fB--quotes local\fR; ignores \fB--inflation\fR and \fB--interest\fR. Adds a
-per-year discount-rate column to the report.
+\fB--model us\fR and \fB--quotes local\fR (the rate model is US-calibrated);
+ignores \fB--inflation\fR and \fB--interest\fR. Adds a per-year discount-rate
+column to the report.
 .TP
 .BI --initial-rate " RATE"
 Starting ("today's") 10-year rate the dynamic path begins from, as a decimal
@@ -171,31 +173,37 @@ year's withdrawal (e.g. \fB0.5\fR). Must be non-negative and not exceed
 .BI --seed " INT"
 Seed for the random number generator, for reproducible paths. Default: random.
 .SH MODELS
-The return models are defined in
-.BR equity_model.py ,
-calibrated to paired S&P 500 nominal total returns and CPI annual-average
-inflation for 1928\(en2025 (see
+The return sampler is defined in
+.BR equity_model.py .
+All three choices use the same \fIcircular moving-block bootstrap\fR: consecutive
+runs of
+.B --block-length
+years are resampled and stitched together (wrapping past the end of the series),
+which preserves serial correlation \(em notably the year-to-year persistence of
+inflation and equity momentum/mean-reversion \(em and so widens the left tail of
+multi-year outcomes. Equity and inflation are always drawn as matched pairs.
+What differs is \fIwhich history\fR is sampled:
+.TP
+.B us
+The US series alone: paired S&P 500 nominal total return and CPI annual-average
+inflation, 1928\(en2025 (see
 .BR market_data.py ).
 .TP
-.B bootstrap
-IID historical bootstrap: each year is an actual historical year-pair drawn with
-replacement. Preserves the empirical distribution (fat left tail, skew, and the
-contemporaneous equity/inflation correlation). Recommended default for tail-risk
-work; serial correlation between years is not preserved.
+.B global
+A broad sample of developed markets: 16 countries with equity data, 1871\(en2020,
+from the Jord\(`a\(enSchularick\(enTaylor Macrohistory Database (see
+.BR global_market_data.py ).
+Each block is drawn from a single country (countries weighted by their number of
+years). The US has been an ex post outlier among developed markets, so this gives
+a more cautious, internationally-grounded distribution \(em including
+catastrophes the US never saw. Requires the JST data file
+.RB ( fetch_global_data.py ).
 .TP
-.B block
-Circular moving-block bootstrap: resamples consecutive runs of
-.B --block-length
-years and stitches them together (wrapping past the end of the series).
-Preserves serial correlation \(em notably the strong year-to-year persistence of
-inflation \(em which widens the left tail of multi-year outcomes. Longer blocks
-preserve more persistence.
-.TP
-.B lognormal
-Draws from a bivariate normal fitted to (log(1+equity), log(1+inflation)).
-Smooth and able to extrapolate beyond observed values, but has zero
-skew/kurtosis and so understates tail risk. The fitted covariance still
-reproduces the historical correlation.
+.B postwar
+The same broad sample restricted to 1950 and later, on the view that the
+post-WWII global order is a more relevant guide to the future than the
+1870\(en1945 era of world wars and hyperinflations. Sits between \fBus\fR and
+\fBglobal\fR.
 .SH OUTPUT
 A calibration header (model, sample span, equity arithmetic/geometric mean and
 standard deviation, CPI mean and standard deviation, equity/inflation
@@ -242,28 +250,28 @@ python withdrawal_projection.py 1000000 65 M FL --interest 0.04 --improvement
 .fi
 .RE
 .PP
-Dynamic inflation with a discount rate that tracks it:
+US sample with dynamic inflation and a discount rate that tracks it:
 .PP
 .RS
 .nf
-python withdrawal_projection.py 1000000 65 M FL --dynamic-rates --model block
+python withdrawal_projection.py 1000000 65 M FL --model us --dynamic-rates
 .fi
 .RE
 .PP
-A joint-life projection using live site quotes and the lognormal model:
+A joint-life projection on the global sample using live site quotes:
 .PP
 .RS
 .nf
 python withdrawal_projection.py 1000000 65 M FL --quotes site \\
-    --joint-age 63 --joint-gender F --model lognormal
+    --joint-age 63 --joint-gender F --model global
 .fi
 .RE
 .PP
-A block bootstrap with 10-year blocks to emphasize inflation persistence:
+The post-WWII sample with 10-year blocks to emphasize inflation persistence:
 .PP
 .RS
 .nf
-python withdrawal_projection.py 1000000 70 F CA --model block --block-length 10
+python withdrawal_projection.py 1000000 70 F CA --model postwar --block-length 10
 .fi
 .RE
 .PP
@@ -299,10 +307,14 @@ SOA Projection Scale G2 improvement tables (male / female), used by
 Fetches and parses live site quotes; used only with \fB--quotes site\fR.
 .TP
 .B equity_model.py
-The equity-return / inflation models.
+The block-bootstrap equity-return / inflation sampler (us/global/postwar).
 .TP
 .B market_data.py
-Embedded historical S&P 500 returns and CPI inflation, 1928\(en2025.
+Embedded historical US S&P 500 returns and CPI inflation, 1928\(en2025.
+.TP
+.B global_market_data.py
+Broad developed-market returns (JST) for the global/postwar samples; reads the
+\fBfetch_global_data.py\fR-derived data file.
 .SH ENVIRONMENT
 Run with the project virtualenv, which provides NumPy:
 .B ~/finance/planning/.venv/bin/python.

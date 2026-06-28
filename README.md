@@ -125,34 +125,34 @@ window has three sections: an **Inputs** panel at the top, a scrollable
 | **Age** | Your current age. Used to look up the annuity payout rate. |
 | **Gender** | `M` or `F`. |
 | **State** | Your U.S. state. Used only when **Quotes** is set to `site`; ignored otherwise. |
-| **Joint age** | (Optional) Age of a spouse or partner. Leave blank for a single-life calculation. |
-| **Joint gender** | (Optional) Gender of the second person. Must be filled in if Joint age is given. |
+| **Joint age** | (Optional) Age of a spouse or partner. Leave blank for a single-life calculation. Defaults to 65 (a couple); a second life lowers the payout (last-survivor pricing). |
+| **Joint gender** | (Optional) Gender of the second person (default F). Must be filled in if Joint age is given. |
 
 #### Simulation settings
 
 | Field | What to enter |
 |-------|---------------|
 | **Sims** | Number of Monte Carlo paths to run (default 5,000). More paths give smoother percentile estimates; 1,000–10,000 is a reasonable range. |
-| **Years** | How many years to project (default 30). |
-| **Model** | The scenario generator: `bootstrap`, `block` (recommended), or `lognormal`. See [Simulating returns, inflation, and interest rates](#simulating-returns-inflation-and-interest-rates). |
-| **Block length** | Only used when **Model** is `block`. The number of consecutive historical years drawn together (default 5). A longer block better preserves multi-year trends but samples fewer distinct blocks from the 98-year history. |
+| **Years** | How many years to project (default 35 — long enough to provision for longevity, not just life expectancy). |
+| **Model** | Which historical return **sample** to draw from: `us`, `global` (default), or `postwar`. See [Simulating returns, inflation, and interest rates](#simulating-returns-inflation-and-interest-rates). |
+| **Block length** | The number of consecutive historical years drawn together in the block bootstrap (default 5). Longer blocks preserve more multi-year (sequence) risk but sample fewer distinct blocks. |
 | **Seed** | Optional integer. Setting a seed makes runs reproducible. Leave blank for a fresh random run each time. |
 
 #### Spending controls
 
 | Field | What to enter |
 |-------|---------------|
-| **Upper bound** | (Optional) Maximum real spending as a multiple of the first year's withdrawal. For example, `1.3` limits every later year to at most 30% more than year 1 in today's dollars. Useful if you want to bank gains rather than spend them all. |
+| **Upper bound** | (Optional, default 1.5) Maximum real spending as a multiple of the first year's withdrawal. For example, `1.5` limits every later year to at most 50% more than year 1 in today's dollars. This **preserves capital when markets do very well** — banking gains for later years and bequest rather than spending them all. |
 | **Lower bound** | (Optional) Minimum real spending as a multiple of the first year's withdrawal. For example, `0.6` ensures that even in a bad market the withdrawal does not drop below 60% of year 1's level. |
 
 #### Annuity pricing and rates
 
 | Field / control | What it does |
 |-----------------|--------------|
-| **Inflation** | Assumed annual inflation rate (default 2.5%). Used to deflate results to today's dollars when **Dynamic inflation + rate** is off. |
+| **Inflation** | Assumed constant annual inflation rate, used to deflate results to today's dollars in constant mode. Default blank (treated as 0%); real outcomes are essentially invariant to it. Ignored when **Dynamic inflation + rate** is on. |
 | **Quotes** | `local` (default, offline, instant) or `site` (live quotes from immediateannuities.com, requires internet). Local pricing uses published SOA actuarial tables and matches market quotes at roughly 4.5–5% interest. |
 | **Interest rate** | The annuity discount rate. When **Dynamic inflation + rate** is off this is a fixed rate used throughout; when it is on this is the *starting* rate and the model evolves it each year. Default is 4.3% (approximately the 2026 10-year Treasury yield). |
-| **Dynamic inflation + rate** | Check this box to simulate both inflation and interest rates year-by-year rather than holding them constant. This is the recommended setting; see [Simulating returns, inflation, and interest rates](#simulating-returns-inflation-and-interest-rates). Requires **Quotes = local**. |
+| **Dynamic inflation + rate** | Simulate inflation and the discount rate year-by-year rather than holding them constant. Available **only with the `us` sample** (and **Quotes = local**) — the rate model is calibrated on US data; the `global`/`postwar` samples always use constant inflation. Off by default. |
 | **Scale G2 mortality improvement** | Applies the SOA Projection Scale G2 mortality improvement factors, projecting longer lifespans forward from the 2012 base tables. This lowers the annual payout slightly, reflecting that people who are alive to collect an annuity tend to live longer than the general population average. Requires **Quotes = local**. |
 
 #### Running the simulation
@@ -245,24 +245,33 @@ whether a simulation has been run.
 
 ### How equity returns are modeled
 
-Every simulated year requires a nominal equity return. The simulator draws from
-**98 years of paired S&P 500 total-return and CPI data (1928–2025)**. Three
-scenario generators are available:
-
-- **bootstrap** (default) — resample actual historical year-pairs with
-  replacement (IID). Preserves the empirical distribution including the fat
-  left tail and skew that parametric models smooth away.
-- **block** *(recommended)* — circular block bootstrap: draw consecutive runs
-  of `block_length` historical years and stitch them together. Unlike the IID
-  bootstrap this preserves **serial correlation** — multi-year inflation
-  persistence and equity momentum or mean-reversion — which widens the left
-  tail of multi-year outcomes and gives a more realistic picture of
-  sequence-of-returns risk.
-- **lognormal** — draw from a fitted bivariate normal distribution. Smooth,
-  but understates tail risk.
-
+Every simulated year requires a nominal equity return paired with an inflation
+rate. The simulator always uses a **circular block bootstrap** — it draws
+consecutive runs of `block_length` historical years and stitches them together,
+which preserves **serial correlation** (multi-year inflation persistence and
+equity momentum / mean-reversion) and so captures sequence-of-returns risk.
 Equity and inflation are always drawn **jointly** (as matched historical pairs),
 preserving their historical correlation.
+
+What differs between the three **Model** choices is *which history* is sampled:
+
+- **us** — the US series alone: 98 years of paired S&P 500 total-return and CPI
+  data (1928–2025).
+- **global** *(default)* — a broad sample of developed markets: 16 countries with
+  equity data, 1871–2020, from the Jordà–Schularick–Taylor Macrohistory Database.
+  The US has been an *outlier* among developed markets (near the top on return,
+  and spared the worst crashes), so a broad sample gives a more cautious,
+  forward-looking picture — including catastrophes the US never saw (Germany and
+  Japan around WWII lost ~90% in real terms in a single year). Each block is
+  drawn from a single country, so within-country sequence risk is preserved.
+- **postwar** — the same broad sample restricted to **1950 and later**, on the
+  view that the post-WWII global order is a more relevant guide to the future
+  than the 1870–1945 era of world wars and hyperinflations. It sits between `us`
+  and `global`.
+
+> The `global` and `postwar` samples are built from the JST Macrohistory Database
+> (CC BY-NC-SA), which is **not bundled** with this repository — see
+> `data/README.md` to fetch it. Without it, the `us` sample still works.
 
 ### Constant vs. dynamic inflation and interest rates
 
@@ -273,32 +282,32 @@ inflation, each sampled year's nominal return is restated: the historical
 inflation embedded in it is stripped out and the assumed inflation re-applied,
 preserving the real return.
 
-**Dynamic inflation and rates (recommended — check "Dynamic inflation + rate"):**
-Inflation varies year-to-year using the sampled historical rates from the block
-bootstrap, so each path experiences its own inflation sequence. Equity returns
-are used as drawn (preserving the historical equity/inflation pairing). The
+**Dynamic inflation and rates (`us` sample only — check "Dynamic inflation +
+rate"):** Inflation varies year-to-year using each path's sampled rates, and the
 annuity discount rate evolves each year according to an error-correction model
 fit to 10-year Treasury yields and CPI from 1954–2025: the rate adjusts slowly
 toward a long-run Fisher target driven by last year's inflation, with a fitted
 adjustment speed of about one-sixth of the gap per year. This reproduces the
 sluggish pass-through observed historically, including the negative real yields
-of 2020–2022. All results are still deflated to today's dollars using each
-path's cumulative inflation.
+of 2020–2022. Because that rate model is calibrated on **US** data, dynamic mode
+is available only with the `us` sample (and **Quotes = local**); the `global` and
+`postwar` samples always use constant inflation. All results are deflated to
+today's dollars.
 
 ### Recommended settings
 
-For the most realistic assessment of long-run risk:
+For a cautious, internationally-grounded assessment of long-run risk:
 
-- Set **Model** to `block` with the default block length of 5 years.
-- Check **Dynamic inflation + rate**.
-- Leave **Quotes** as `local` (required for dynamic rates, and runs instantly).
+- Set **Model** to `global` (or `postwar`) — these are the defaults' intent: don't
+  bet the plan on the US repeating its historically exceptional run.
+- Keep the default block length of 5 years.
+- Leave **Quotes** as `local` (offline and instant).
+- Consider an **Upper bound** (default 1.5) to preserve capital in good markets.
 - Read the results in **today's dollars** — the on-screen report and fan chart
   both express balances and withdrawals in real (inflation-adjusted) terms.
 
-The constant-inflation mode is useful for quick runs or for isolating the
-effect of a specific assumption, but the dynamic mode gives a more complete
-picture because it lets inflation and interest rates vary together with
-equity returns as they do in history.
+To explore the US-specific dynamic inflation/rate model instead, switch **Model**
+to `us` and check **Dynamic inflation + rate**.
 
 Full technical details — model specification, OLS estimates, fit diagnostics,
 and references — are in **METHODOLOGY.pdf** (accessible from the **Docs**
@@ -314,16 +323,16 @@ terminal. All scripts accept `--help` for a full list of options.
 ### `montecarlo.py` — many-path simulation
 
 ```bash
-# default 5000-path run (local pricing, offline)
+# default 5000-path run, global developed-market sample (local pricing, offline)
 .venv/bin/python montecarlo.py 1000000 65 M FL
 
-# dynamic inflation + interest rate, block bootstrap (recommended)
-.venv/bin/python montecarlo.py 1000000 65 M FL --dynamic-rates --model block
+# US sample with dynamic inflation + interest rate (US-only feature)
+.venv/bin/python montecarlo.py 1000000 65 M FL --model us --dynamic-rates
 
-# joint life with spending bounds
-.venv/bin/python montecarlo.py 1000000 65 M FL \
-    --joint-age 63 --joint-gender F \
-    --upper-bound 1.3 --lower-bound 0.6
+# post-WWII global sample, joint life, capital-preserving upper bound
+.venv/bin/python montecarlo.py 1000000 65 M FL --model postwar \
+    --joint-age 65 --joint-gender F \
+    --upper-bound 1.5 --lower-bound 0.6
 
 # save a PDF report directly
 .venv/bin/python montecarlo.py 1000000 65 M FL
@@ -336,9 +345,9 @@ terminal. All scripts accept `--help` for a full list of options.
 # reproducible single path
 .venv/bin/python withdrawal_projection.py 1000000 65 M FL --seed 1
 
-# block bootstrap with dynamic rates
+# US sample with dynamic rates
 .venv/bin/python withdrawal_projection.py 1000000 65 M FL \
-    --dynamic-rates --model block
+    --model us --dynamic-rates
 ```
 
 ### `annuity_pricing.py` — standalone annuity calculator
