@@ -203,6 +203,18 @@ def _worst_return_lines(worst_1yr, worst_5yr):
     return lines
 
 
+def geo_mean_return(equities, inflations=None):
+    """Per-path annualized geometric-mean equity return.
+
+    Real when `inflations` is given (each year's growth is deflated), else
+    nominal: prod(growth)**(1/years) - 1 across each path's yearly returns.
+    """
+    growth = 1.0 + equities
+    if inflations is not None:
+        growth = growth / (1.0 + inflations)
+    return np.prod(growth, axis=1) ** (1.0 / equities.shape[1]) - 1.0
+
+
 def _payout_table_lines(title, payouts, age):
     """Text lines for the per-year payout confidence-interval table."""
     years = payouts.shape[1]
@@ -236,7 +248,8 @@ def _summary_row(label, s):
 
 
 def write_csv(path, *, header_line, params_line, end_real, end_nom,
-              worst_1yr, worst_5yr, payout_title, payout, age):
+              worst_1yr, worst_5yr, geo_real, geo_nom,
+              payout_title, payout, age):
     """Write the ending-balance summary and per-year payout table to CSV."""
     ci_cols = ["ci80_lo", "ci80_hi", "ci90_lo", "ci90_hi",
                "ci95_lo", "ci95_hi", "ci99_lo", "ci99_hi"]
@@ -250,6 +263,8 @@ def write_csv(path, *, header_line, params_line, end_real, end_nom,
         w.writerow(_summary_row("today's dollars", summarize(end_real)))
         w.writerow(_summary_row("nominal dollars", summarize(end_nom)))
         w.writerow([])
+        w.writerow(["total return real (geo mean, median)", f"{geo_real:.4f}"])
+        w.writerow(["total return nominal (geo mean, median)", f"{geo_nom:.4f}"])
         w.writerow(["worst 1-yr real return", f"{worst_1yr:.4f}"])
         if worst_5yr is not None:
             w.writerow(["worst 5-yr real return (cumulative)", f"{worst_5yr:.4f}"])
@@ -327,6 +342,8 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     elapsed = time.time() - t0
 
     worst_1yr, worst_5yr = worst_real_returns(equities, inflations)
+    geo_real = float(np.median(geo_mean_return(equities, inflations)))
+    geo_nom = float(np.median(geo_mean_return(equities)))
 
     model_summary = jrm.summary()
     bounds_bits = []
@@ -357,8 +374,11 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
 
     real_block = _balance_block_lines(
         "Ending balance - today's dollars", end_real,
-        extras=_worst_return_lines(worst_1yr, worst_5yr))
-    nom_block = _balance_block_lines("Ending balance - nominal dollars", end_nom)
+        extras=([f"  total return (geo mean) {geo_real:>7.1%}  (median)"]
+                + _worst_return_lines(worst_1yr, worst_5yr)))
+    nom_block = _balance_block_lines(
+        "Ending balance - nominal dollars", end_nom,
+        extras=[f"  total return (geo mean) {geo_nom:>7.1%}  (median)"])
 
     pct_below_start = 100.0 * np.mean(end_real < amount)
     pct_below_half = 100.0 * np.mean(end_real < amount * 0.5)
@@ -386,6 +406,7 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
         header_line=footer_text, params_line=params_line,
         end_real=end_real, end_nom=end_nom,
         worst_1yr=worst_1yr, worst_5yr=worst_5yr,
+        geo_real=geo_real, geo_nom=geo_nom,
         payout_title=payout_title, payout=payout, age=age,
     )
     report_data = dict(
