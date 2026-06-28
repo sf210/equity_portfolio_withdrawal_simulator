@@ -98,22 +98,25 @@ def _fan(ax, series, title, *, symlog=False, amount=None):
 
 
 def _balance_hist(ax, values, title, amount):
-    """Histogram of ending balances on a pseudo-log (symlog) x-axis.
+    """Histogram of ending balances on a log x-axis starting at $1.
 
-    Balances span depletion (0) to many multiples of the start, so a linear axis
-    is unreadable. symlog keeps 0 visible (linear below `linthresh`) and log-
-    spaces the rest; bins are matched to that spacing.
+    Balances span depletion (0) to many multiples of the start. A log axis from
+    $1 keeps the surviving distribution readable; the large mass of depleted
+    paths (balance below $1) falls off the left edge rather than dominating with
+    a spike at zero. The depletion rate is shown elsewhere (fan chart / summary).
     """
     v = np.asarray(values, dtype=float)
-    linthresh = max(1_000.0, amount / 100.0)
-    vmax = max(float(v.max()), linthresh * 10.0)
-    pos_bins = np.logspace(np.log10(linthresh), np.log10(vmax), 38)
-    bins = np.concatenate([[0.0], pos_bins])
+    vmax = max(float(v.max()), 10.0)
+    bins = np.logspace(0.0, np.log10(vmax), 40)  # $1 -> max
     ax.hist(v, bins=bins, color=_BAR, edgecolor="white", linewidth=0.4)
-    ax.set_xscale("symlog", linthresh=linthresh)
-    ax.set_xlim(0, vmax)
+    ax.set_xscale("log")
+    ax.set_xlim(1.0, vmax)
     med = float(np.median(v))
-    ax.axvline(med, color="#c62828", lw=1.4, ls="--", label=f"median {_money(med)}")
+    lbl = f"median {_money(med)}"
+    if med >= 1.0:
+        ax.axvline(med, color="#c62828", lw=1.4, ls="--", label=lbl)
+    else:  # median below $1: most paths deplete; show the label only
+        ax.plot([], [], color="#c62828", lw=1.4, ls="--", label=lbl)
     ax.set_title(title, fontsize=12, loc="left")
     ax.set_ylabel("Simulations")
     ax.xaxis.set_major_formatter(FuncFormatter(_money))
