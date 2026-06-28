@@ -478,7 +478,7 @@ def main(argv=None) -> int:
     p.add_argument("--lower-bound", type=float, default=None,
                    help="floor annual withdrawal at this factor of year-1's "
                         "withdrawal, in today's dollars (e.g. 0.5)")
-    p.add_argument("--seed", type=int, default=None, help="RNG seed for reproducibility")
+    p.add_argument("--seed", type=int, default=42, help="RNG seed for reproducibility")
     args = p.parse_args(argv)
 
     if (args.joint_age is None) != (args.joint_gender is None):
