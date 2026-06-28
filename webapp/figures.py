@@ -94,7 +94,9 @@ def _fan(ax, series, title, *, symlog=False, amount=None):
         handles.append(Patch(color=color, label=f"{_ord(outer)} pct"))
     for (_i, outer), color in zip(_LOWER, _REDS):
         handles.append(Patch(color=color, label=f"{_ord(outer)} pct"))
-    ax.legend(handles=handles, loc="upper left", fontsize=8, ncol=2, framealpha=0.9)
+    # Outside the plot (right) so it never sits on top of the shaded bands.
+    ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.005, 0.5),
+              fontsize=8, framealpha=0.95)
 
 
 def _balance_hist(ax, values, title, amount):
@@ -171,10 +173,11 @@ def build_figures(data: dict) -> dict:
     fig, ax = plt.subplots(figsize=(10, 4.2))
     _fan(ax, data["payouts_real"], "Annual withdrawal — today's dollars")
     ax.set_ylabel("Withdrawal (today's $)")
-    # Linear axis topped just above the highest (98th-pct) value, so the upper
-    # band is fully visible with a small margin.
+    # Linear axis sized to the data (98th-pct band) with clear headroom, so the
+    # top band is never clipped. Determined per run, so the scale varies with the
+    # inputs.
     top = float(np.percentile(data["payouts_real"], 98, axis=0).max())
-    ax.set_ylim(0, top * 1.06)
+    ax.set_ylim(0, top * 1.15)
     figs["cashflow"] = _png(fig)
 
     fig, ax = plt.subplots(figsize=(6.4, 3.6))
