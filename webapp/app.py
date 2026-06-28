@@ -88,7 +88,7 @@ DEFAULTS = {
     "amount": "1,000,000", "sims": "5000", "age": "65", "years": "35",
     "gender": "M", "model": "global", "state": "FL", "block_length": "5",
     "joint_age": "65", "joint_gender": "F", "upper_bound": "1.5",
-    "lower_bound": "", "seed": "", "inflation": "",
+    "lower_bound": "", "seed": "42", "inflation": "",
     "interest": str(mc.rate_model.DEFAULT_INITIAL_RATE),
     "dynamic": "", "improvement": "on",
 }
