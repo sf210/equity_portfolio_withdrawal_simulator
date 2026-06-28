@@ -12,8 +12,9 @@ The simulation core is untouched.
 
 Design notes for a *public* deployment:
 
-* Inputs are hard-capped (``MAX_SIMS`` / ``MAX_YEARS`` / ``MAX_BLOCK_LENGTH``)
-  so a visitor cannot ask for an unbounded amount of CPU work.
+* The path count is fixed (``FIXED_SIMS``) and the other inputs are hard-capped
+  (``MAX_YEARS`` / ``MAX_BLOCK_LENGTH``) so a visitor cannot ask for an unbounded
+  amount of CPU work.
 * The pricing source is forced to ``local`` -- no per-request outbound web
   fetches (the ``site`` quote source is never exposed here).
 * A process-wide semaphore caps how many simulations run at once; excess
@@ -40,6 +41,7 @@ import secrets
 import sys
 import tempfile
 import threading
+from datetime import datetime
 from functools import lru_cache
 
 import numpy as np
@@ -64,7 +66,8 @@ from flask import (  # noqa: E402
 # --------------------------------------------------------------------------- #
 # Limits (override via environment on the server).
 # --------------------------------------------------------------------------- #
-MAX_SIMS = int(os.environ.get("MC_MAX_SIMS", "20000"))
+# Number of paths is fixed (not a user input) to bound per-request CPU.
+FIXED_SIMS = int(os.environ.get("MC_SIMS", "5000"))
 MAX_YEARS = int(os.environ.get("MC_MAX_YEARS", "60"))
 MAX_BLOCK_LENGTH = int(os.environ.get("MC_MAX_BLOCK_LENGTH", "50"))
 MAX_AMOUNT = int(os.environ.get("MC_MAX_AMOUNT", str(1_000_000_000_000)))
@@ -171,14 +174,12 @@ def parse_form(form) -> dict:
     if (joint_age is None) != (joint_gender is None):
         raise FormError("Joint age and joint gender must be given together.")
 
+    sims = FIXED_SIMS  # not a user input
     try:
-        sims = int(form.get("sims", ""))
         years = int(form.get("years", ""))
         block_length = int(form.get("block_length", "") or "0")
     except ValueError:
-        raise FormError("Sims, Years, and Block length must be whole numbers.")
-    if not 2 <= sims <= MAX_SIMS:
-        raise FormError(f"Sims must be between 2 and {MAX_SIMS:,}.")
+        raise FormError("Years and Block length must be whole numbers.")
     if not 1 <= years <= MAX_YEARS:
         raise FormError(f"Years must be between 1 and {MAX_YEARS}.")
     if not 1 <= block_length <= MAX_BLOCK_LENGTH:
@@ -309,7 +310,7 @@ def _pcts(arr) -> list:
 
 
 def _summary(data: dict) -> dict:
-    """Portfolio-summary rows: each metric across the percentile columns."""
+    """Portfolio summary split into a real section and a nominal section."""
     eq, infl = data["equities"], data["inflations"]
     total_nom = np.prod(1.0 + eq, axis=1) - 1.0
     total_real = np.prod((1.0 + eq) / (1.0 + infl), axis=1) - 1.0
@@ -322,17 +323,20 @@ def _summary(data: dict) -> dict:
     def pct_row(label, arr):
         return {"label": label, "cells": [_pct(v) for v in _pcts(arr)]}
 
-    rows = [
-        money_row("Ending balance — nominal", data["end_nom"]),
-        money_row("Ending balance — real (today's $)", data["end_real"]),
-        pct_row("Total return — nominal", total_nom),
-        pct_row("Total return — real", total_real),
-        money_row("Mean annual withdrawal — nominal", wd_nom),
-        money_row("Mean annual withdrawal — real", wd_real),
+    real_rows = [
+        money_row("Ending balance", data["end_real"]),
+        pct_row("Total return (cumulative)", total_real),
+        money_row("Mean annual withdrawal", wd_real),
+    ]
+    nominal_rows = [
+        money_row("Ending balance", data["end_nom"]),
+        pct_row("Total return (cumulative)", total_nom),
+        money_row("Mean annual withdrawal", wd_nom),
     ]
     worst = {"one_yr": _pct(data["worst_1yr"]),
              "five_yr": None if data["worst_5yr"] is None else _pct(data["worst_5yr"])}
-    return {"headers": PCT_HEADERS, "rows": rows, "worst": worst}
+    return {"headers": PCT_HEADERS, "real": real_rows, "nominal": nominal_rows,
+            "worst": worst}
 
 
 def _withdrawal_rows(data: dict) -> dict:
@@ -352,12 +356,39 @@ def _withdrawal_rows(data: dict) -> dict:
     return {"headers": headers, "rows": rows}
 
 
-def _withdrawal_csv(data: dict) -> str:
+def _withdrawal_csv(data: dict, params: dict) -> str:
     pay = data["payouts_real"]
     age = data["age"]
     extra = [p for p in PCTS if p != 50]
     buf = io.StringIO()
     w = csv.writer(buf)
+
+    # Input assumptions and run date, one element per line, then a blank line.
+    stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    assumptions = [
+        ("Generated", stamp),
+        ("Amount", params["amount"]),
+        ("Age", params["age"]),
+        ("Gender", params["gender"]),
+        ("Joint age", "" if params["joint_age"] is None else params["joint_age"]),
+        ("Joint gender", params["joint_gender"] or ""),
+        ("Return sample", params["model"]),
+        ("Years", params["years"]),
+        ("Simulations", params["sims"]),
+        ("Block length", params["block_length"]),
+        ("Upper bound", "" if params["upper_bound"] is None else params["upper_bound"]),
+        ("Lower bound", "" if params["lower_bound"] is None else params["lower_bound"]),
+        ("Inflation", params["inflation"]),
+        ("Interest rate", params["interest"]),
+        ("Dynamic inflation + rate", params["dynamic_rates"]),
+        ("Scale G2 improvement", params["improvement"]),
+        ("Quotes", params["quotes"]),
+        ("Seed", params["seed"]),
+    ]
+    for label, value in assumptions:
+        w.writerow([label, value])
+    w.writerow([])
+
     w.writerow(["Withdrawals by year (real, today's dollars)"])
     w.writerow(["year", "age", "mean", "median"] + [f"p{p}" for p in extra])
     for t in range(pay.shape[1]):
@@ -371,7 +402,7 @@ def _withdrawal_csv(data: dict) -> str:
 def _render(values, error=None, status=200, **extra):
     return render_template(
         "index.html", values=values, models=MODELS, genders=GENDERS,
-        states=STATES, max_sims=MAX_SIMS, max_years=MAX_YEARS,
+        states=STATES, max_years=MAX_YEARS,
         error=error, **extra), status
 
 
@@ -417,9 +448,18 @@ def withdrawals_csv():
         _text, _csv_kwargs, data = _simulate(params)
     except _GlobalDataMissing:
         abort(503, "The global developed-markets dataset is not installed.")
-    body = _withdrawal_csv(data).encode()
+    body = _withdrawal_csv(data, params).encode()
     return send_file(io.BytesIO(body), mimetype="text/csv", as_attachment=True,
                      download_name="withdrawals_by_year.csv")
+
+
+@app.route("/license")
+def license_text():
+    path = _ROOT / "LICENSE"
+    if not path.exists():
+        abort(404)
+    return send_file(path, mimetype="text/plain", as_attachment=False,
+                     download_name="LICENSE.txt")
 
 
 # Reference documents shipped in the repo root, served inline (view in browser).

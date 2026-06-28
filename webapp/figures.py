@@ -97,6 +97,30 @@ def _fan(ax, series, title, *, symlog=False, amount=None):
     ax.legend(handles=handles, loc="upper left", fontsize=8, ncol=2, framealpha=0.9)
 
 
+def _balance_hist(ax, values, title, amount):
+    """Histogram of ending balances on a pseudo-log (symlog) x-axis.
+
+    Balances span depletion (0) to many multiples of the start, so a linear axis
+    is unreadable. symlog keeps 0 visible (linear below `linthresh`) and log-
+    spaces the rest; bins are matched to that spacing.
+    """
+    v = np.asarray(values, dtype=float)
+    linthresh = max(1_000.0, amount / 100.0)
+    vmax = max(float(v.max()), linthresh * 10.0)
+    pos_bins = np.logspace(np.log10(linthresh), np.log10(vmax), 38)
+    bins = np.concatenate([[0.0], pos_bins])
+    ax.hist(v, bins=bins, color=_BAR, edgecolor="white", linewidth=0.4)
+    ax.set_xscale("symlog", linthresh=linthresh)
+    ax.set_xlim(0, vmax)
+    med = float(np.median(v))
+    ax.axvline(med, color="#c62828", lw=1.4, ls="--", label=f"median {_money(med)}")
+    ax.set_title(title, fontsize=12, loc="left")
+    ax.set_ylabel("Simulations")
+    ax.xaxis.set_major_formatter(FuncFormatter(_money))
+    ax.grid(True, axis="y", color=_GRID, lw=0.6)
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+
+
 def _hist(ax, values, title, *, money=True, hi_pct=None):
     # Optionally clip the x-range to a percentile so a long right tail (e.g. the
     # ending-balance distribution) doesn't squash the visible bulk.
@@ -144,11 +168,17 @@ def build_figures(data: dict) -> dict:
     fig, ax = plt.subplots(figsize=(10, 4.2))
     _fan(ax, data["payouts_real"], "Annual withdrawal — today's dollars")
     ax.set_ylabel("Withdrawal (today's $)")
+    # Linear axis topped just above the highest (98th-pct) value, so the upper
+    # band is fully visible with a small margin.
+    top = float(np.percentile(data["payouts_real"], 98, axis=0).max())
+    ax.set_ylim(0, top * 1.06)
     figs["cashflow"] = _png(fig)
 
     fig, ax = plt.subplots(figsize=(6.4, 3.6))
-    _hist(ax, data["end_real"], "Ending portfolio balance (today's $)", hi_pct=99)
-    ax.set_xlabel("Ending balance (today's $, clipped at 99th pct)")
+    _balance_hist(ax, data["end_real"],
+                  "Ending portfolio balance (today's $, log scale)",
+                  data["amount"])
+    ax.set_xlabel("Ending balance (today's $)")
     figs["ending_hist"] = _png(fig)
 
     fig, ax = plt.subplots(figsize=(6.4, 3.6))

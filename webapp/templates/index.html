@@ -109,19 +109,17 @@
         <div class="grid">
           <div><label>Amount ($) <button type="button" class="help" data-help="amount">?</button></label>
             <input name="amount" value="{{ values.get('amount','') }}"></div>
-          <div><label>Simulations <button type="button" class="help" data-help="sims">?</button></label>
-            <input name="sims" value="{{ values.get('sims','') }}"></div>
           <div><label>Age <button type="button" class="help" data-help="age">?</button></label>
             <input name="age" value="{{ values.get('age','') }}"></div>
           <div><label>Years <button type="button" class="help" data-help="years">?</button></label>
             <input name="years" value="{{ values.get('years','') }}"></div>
-
           <div><label>Gender <button type="button" class="help" data-help="gender">?</button></label>
             <select name="gender">
               {% for g in genders %}
               <option value="{{ g }}" {{ 'selected' if values.get('gender')==g }}>{{ g }}</option>
               {% endfor %}
             </select></div>
+
           <div><label>Return sample <button type="button" class="help" data-help="model">?</button></label>
             <select name="model">
               {% for m in models %}
@@ -183,26 +181,42 @@
 
       <div class="actions noprint" style="margin-top:12px;">
         <button type="button" class="secondary" onclick="window.print()">Download PDF</button>
+        <button type="button" class="secondary" onclick="document.getElementById('notes-modal').style.display='flex'">Notes &amp; Disclosures</button>
       </div>
 
       <!-- 1. Portfolio balance over time -->
       <div class="section-h">Portfolio balance over time</div>
       <img class="chart" src="{{ figs.balance }}" alt="Portfolio balance fan chart">
 
-      <!-- 2. Portfolio summary -->
-      <div class="section-h">Portfolio summary</div>
+      <!-- 2. Portfolio summary: real, then nominal -->
+      <div class="section-h">Portfolio summary &mdash; real (today's dollars)</div>
       <table class="data">
         <thead><tr><th class="lbl">Metric</th>
           {% for h in summary.headers %}<th>{{ h }}</th>{% endfor %}
         </tr></thead>
         <tbody>
-          {% for row in summary.rows %}
+          {% for row in summary.real %}
           <tr><td class="lbl">{{ row.label }}</td>
             {% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
           </tr>
           {% endfor %}
         </tbody>
       </table>
+
+      <div class="section-h">Portfolio summary &mdash; nominal</div>
+      <table class="data">
+        <thead><tr><th class="lbl">Metric</th>
+          {% for h in summary.headers %}<th>{{ h }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {% for row in summary.nominal %}
+          <tr><td class="lbl">{{ row.label }}</td>
+            {% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
       <div class="worst">
         Worst single-year market loss (real): <strong>{{ summary.worst.one_yr }}</strong>
         {% if summary.worst.five_yr %} &nbsp;&middot;&nbsp;
@@ -253,6 +267,47 @@
     inputs and the historical return sample chosen.
   </footer>
 
+  <!-- Notes &amp; Disclosures modal -->
+  <div class="modal-backdrop" id="notes-modal">
+    <div class="modal">
+      <h3>Notes &amp; Disclosures</h3>
+      <div class="body" style="white-space:normal;">
+        <p><strong>For educational and informational purposes only — not
+        investment, tax, or legal advice.</strong> Appropriate decisions depend on
+        your individual circumstances, which this tool does not consider.</p>
+        <p>The results are <strong>hypothetical</strong> and do not reflect any
+        actual investment. They come from a Monte Carlo simulation that resamples
+        historical annual returns (the chosen return sample) and applies the
+        assumptions you entered. The model is a <strong>100% equity</strong>
+        portfolio that each year withdraws what a life annuity <em>would</em> pay
+        on the current balance; it is <strong>not</strong> the purchase of an
+        annuity — there is no income guarantee and no mortality pooling, so the
+        balance can be depleted.</p>
+        <p><strong>Past performance is not a guarantee of future results.</strong>
+        Historical samples may not represent the future; left-tail outcomes are
+        especially uncertain. All figures are shown in today's dollars unless
+        labeled nominal.</p>
+        <p>The simulation does <strong>not</strong> model taxes, advisory or fund
+        fees, transaction costs, required minimum distributions, or rebalancing.
+        Annuity-equivalent withdrawals are priced from SOA mortality tables (or,
+        optionally, live quotes) at a discount rate you set and omit insurer
+        loads. Equity returns are restated to a constant-inflation basis except in
+        the US-only dynamic mode.</p>
+        <p>Return data: US S&amp;P 500 total return (Damodaran/NYU Stern) and
+        CPI-U (BLS); the global and post-WWII samples use the
+        <strong>Jordà–Schularick–Taylor Macrohistory Database</strong> (used under
+        CC BY-NC-SA 4.0). See the
+        <a href="/docs/methodology" target="_blank" rel="noopener">Methodology</a>
+        for full details and references.</p>
+        <p>Software is provided under the Mozilla Public License 2.0, without
+        warranty of any kind:
+        <a href="/license" target="_blank" rel="noopener">view license</a>.</p>
+      </div>
+      <div class="actions"><button type="button" class="primary"
+        onclick="document.getElementById('notes-modal').style.display='none'">Close</button></div>
+    </div>
+  </div>
+
   <!-- Help modal -->
   <div class="modal-backdrop" id="help-modal">
     <div class="modal">
@@ -282,8 +337,6 @@
         "The second person's gender, required if you enter a joint age. Like the primary, it only selects a mortality table."},
       state: {title: "State", body:
         "Only used if you choose live 'site' quotes, where insurer payouts vary by state of residence. With the default local pricing it is ignored — any value is fine."},
-      sims: {title: "Simulations", body:
-        "How many random scenarios (paths) to run. More scenarios give smoother, more reliable percentiles at the cost of run time. A few thousand is plenty."},
       years: {title: "Years", body:
         "How many years to project. Choose enough to cover a long life rather than just average life expectancy — e.g. 35 years from age 65 reaches age 100 — so you are stress-testing for longevity."},
       model: {title: "Return sample", body:
@@ -315,10 +368,15 @@
       });
     });
     function closeHelp() { document.getElementById('help-modal').style.display = 'none'; }
-    document.getElementById('help-modal').addEventListener('click', function (e) {
-      if (e.target === this) closeHelp();
+    function closeModals() {
+      document.querySelectorAll('.modal-backdrop').forEach(function (m) {
+        m.style.display = 'none';
+      });
+    }
+    document.querySelectorAll('.modal-backdrop').forEach(function (m) {
+      m.addEventListener('click', function (e) { if (e.target === this) m.style.display = 'none'; });
     });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeHelp(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModals(); });
   </script>
 </body>
 </html>
