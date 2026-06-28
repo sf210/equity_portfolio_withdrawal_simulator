@@ -102,10 +102,10 @@
               <option value="{{ g }}" {{ 'selected' if values.get('gender')==g }}>{{ g }}</option>
               {% endfor %}
             </select></div>
-          <div><label>Return model</label>
+          <div><label>Return sample</label>
             <select name="model">
               {% for m in models %}
-              <option value="{{ m }}" {{ 'selected' if values.get('model')==m }}>{{ m }}</option>
+              <option value="{{ m }}" {{ 'selected' if values.get('model')==m }}>{{ {'us':'United States','global':'Global (developed mkts)'}.get(m, m) }}</option>
               {% endfor %}
             </select></div>
           <div><label>State</label>

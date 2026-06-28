@@ -44,7 +44,7 @@ Example:
     python withdrawal_projection.py 1000000 65 M FL
     python withdrawal_projection.py 1000000 65 M FL --interest 0.04 --improvement
     python withdrawal_projection.py 1000000 65 M FL --quotes site \
-        --joint-age 63 --joint-gender F --model lognormal --seed 1
+        --joint-age 63 --joint-gender F --model global --seed 1
 """
 
 from __future__ import annotations
@@ -341,10 +341,11 @@ def main(argv=None) -> int:
     p.add_argument("--inflation", type=float, default=DEFAULT_INFLATION,
                    help="constant annual inflation rate as a decimal fraction, "
                         f"e.g. 0.025 for 2.5 percent (default {DEFAULT_INFLATION})")
-    p.add_argument("--model", choices=("bootstrap", "block", "lognormal"),
-                   default="bootstrap", help="equity model (default bootstrap)")
+    p.add_argument("--model", choices=("us", "global"),
+                   default="global", help="equity return sample: 'us' (S&P 500 / "
+                   "CPI) or 'global' (broad developed markets, JST; default)")
     p.add_argument("--block-length", type=int, default=5,
-                   help="block size in years for --model block (default 5)")
+                   help="block size in years for the block bootstrap (default 5)")
     p.add_argument("--quotes", choices=("local", "site"), default=DEFAULT_QUOTES,
                    help="annuity pricing source: local SOA-table model (offline, "
                         f"default) or live immediateannuities.com (default {DEFAULT_QUOTES})")
@@ -385,6 +386,8 @@ def main(argv=None) -> int:
         p.error("--inflation must be greater than -1 (i.e. > -100%)")
     if args.dynamic_rates and args.quotes != "local":
         p.error("--dynamic-rates requires --quotes local")
+    if args.dynamic_rates and args.model != "us":
+        p.error("--dynamic-rates requires --model us")
 
     model = JointReturnModel(args.model, block_length=args.block_length)
     rng = np.random.default_rng(args.seed)

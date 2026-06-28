@@ -305,6 +305,13 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     Raises annuity_quote.QuoteError / urllib.error.URLError (site quotes) or
     FileNotFoundError (--improvement without the G2 tables) on pricing failure.
     """
+    # Dynamic rates evolve a US-calibrated annuity discount model from a sampled
+    # inflation path; that only makes sense with the US sample (driving it with
+    # foreign -- e.g. hyperinflation -- series is meaningless). The global sample
+    # always uses the constant-inflation real-restatement path instead.
+    if dynamic_rates and model != "us":
+        raise ValueError("dynamic rates are only available with the US sample "
+                         "(model='us'); the global sample uses constant inflation.")
     t0 = time.time()
     (jrm, end_nom, end_real, pay_nom, pay_real, equities, inflations,
      balances_real, interests) = run(
@@ -420,10 +427,11 @@ def main(argv=None) -> int:
     p.add_argument("--inflation", type=float, default=wp.DEFAULT_INFLATION,
                    help="constant annual inflation rate as a decimal fraction, "
                         f"e.g. 0.025 for 2.5 percent (default {wp.DEFAULT_INFLATION})")
-    p.add_argument("--model", choices=("bootstrap", "block", "lognormal"),
-                   default="bootstrap", help="equity model (default bootstrap)")
+    p.add_argument("--model", choices=("us", "global"),
+                   default="global", help="equity return sample: 'us' (S&P 500 / "
+                   "CPI) or 'global' (broad developed markets, JST; default)")
     p.add_argument("--block-length", type=int, default=5,
-                   help="block size in years for --model block (default 5)")
+                   help="block size in years for the block bootstrap (default 5)")
     p.add_argument("--quotes", choices=("local", "site"), default=wp.DEFAULT_QUOTES,
                    help="annuity pricing source: local SOA-table model (offline, "
                         f"default) or live immediateannuities.com (default {wp.DEFAULT_QUOTES})")
@@ -458,6 +466,8 @@ def main(argv=None) -> int:
         p.error("--inflation must be greater than -1 (i.e. > -100%)")
     if args.dynamic_rates and args.quotes != "local":
         p.error("--dynamic-rates requires --quotes local")
+    if args.dynamic_rates and args.model != "us":
+        p.error("--dynamic-rates requires --model us")
     if args.upper_bound is not None and args.upper_bound <= 0:
         p.error("--upper-bound must be positive")
     if args.lower_bound is not None and args.lower_bound < 0:

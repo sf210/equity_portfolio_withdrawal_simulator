@@ -120,21 +120,21 @@ class MonteCarloGUI:
         row(0, 2, "Sims"); self.sims = entry(0, 2, "5000")
 
         row(1, 0, "Age"); self.age = entry(1, 0, "65")
-        row(1, 2, "Years"); self.years = entry(1, 2, "30")
+        row(1, 2, "Years"); self.years = entry(1, 2, "35")
 
         row(2, 0, "Gender"); self.gender = combo(2, 0, ["M", "F"], "M")
         row(2, 2, "Model")
-        self.model = combo(2, 2, ["bootstrap", "block", "lognormal"], "block")
+        self.model = combo(2, 2, ["us", "global"], "global")
 
         row(3, 0, "State")
         self.state = combo(3, 0, sorted(annuity_quote.STATES), "FL")
         row(3, 2, "Block length"); self.block_length = entry(3, 2, "5")
 
-        row(4, 0, "Joint age"); self.joint_age = entry(4, 0, "")
-        row(4, 2, "Upper bound"); self.upper_bound = entry(4, 2, "")
+        row(4, 0, "Joint age"); self.joint_age = entry(4, 0, "65")
+        row(4, 2, "Upper bound"); self.upper_bound = entry(4, 2, "1.5")
 
         row(5, 0, "Joint gender")
-        self.joint_gender = combo(5, 0, ["", "M", "F"], "")
+        self.joint_gender = combo(5, 0, ["", "M", "F"], "F")
         row(5, 2, "Lower bound"); self.lower_bound = entry(5, 2, "")
 
         row(6, 0, "Seed"); self.seed = entry(6, 0, "42")
@@ -148,8 +148,8 @@ class MonteCarloGUI:
         row(7, 2, "Interest rate")
         self.interest = entry(7, 2, str(mc.rate_model.DEFAULT_INITIAL_RATE))
 
-        self.dynamic = tk.BooleanVar(value=True)
-        ttk.Checkbutton(frm, text="Dynamic inflation + rate (local only)",
+        self.dynamic = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text="Dynamic inflation + rate (US sample, local only)",
                         variable=self.dynamic).grid(
             row=8, column=0, columnspan=3, sticky="w", pady=2)
 
@@ -254,6 +254,9 @@ class MonteCarloGUI:
         dynamic = bool(self.dynamic.get())
         if dynamic and quotes != "local":
             raise ValueError("Dynamic rates require the local quotes source.")
+        if dynamic and self.model.get() != "us":
+            raise ValueError("Dynamic inflation + rate is only available with "
+                             "the US sample (Model = us).")
 
         def factor(widget):
             v = _optional(widget.get())
