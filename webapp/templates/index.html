@@ -15,7 +15,7 @@
     header { background: var(--accent); color: #fff; padding: 14px 20px; }
     header h1 { margin: 0; font-size: 18px; }
     header p { margin: 4px 0 0; font-size: 12.5px; opacity: .9; }
-    main { max-width: 1000px; margin: 18px auto; padding: 0 16px; }
+    main { max-width: 1040px; margin: 18px auto; padding: 0 16px; }
     .card { background: #fff; border: 1px solid var(--line); border-radius: 8px;
             padding: 16px; margin-bottom: 16px; }
     fieldset { border: none; padding: 0; margin: 0; }
@@ -37,114 +37,142 @@
     button:disabled { opacity: .5; cursor: not-allowed; }
     .error { background: #fdecea; border: 1px solid #f5c6c2; color: #8a2018;
              padding: 10px 12px; border-radius: 6px; font-size: 13px; }
-    .report { white-space: pre; overflow-x: auto; font-family: ui-monospace,
-              "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px;
-              line-height: 1.35; background: #fbfcfd; border: 1px solid var(--line);
-              border-radius: 6px; padding: 12px; }
     .hint { font-size: 11.5px; color: var(--muted); }
-    footer { max-width: 1000px; margin: 0 auto 28px; padding: 0 16px;
+
+    /* Help "?" buttons + modal */
+    .help { all: unset; cursor: pointer; display: inline-grid; place-items: center;
+            width: 15px; height: 15px; border-radius: 50%; background: #e3eaf0;
+            color: #355; font-size: 10px; font-weight: 700; margin-left: 5px;
+            line-height: 1; }
+    .help:hover { background: var(--accent); color: #fff; }
+    .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 50;
+            background: rgba(0,0,0,.45); align-items: center; justify-content: center; }
+    .modal { background: #fff; max-width: 540px; width: calc(100% - 32px);
+             max-height: 80vh; overflow-y: auto; border-radius: 10px; padding: 20px 22px; }
+    .modal h3 { margin: 0 0 10px; color: var(--accent); font-size: 16px; }
+    .modal .body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.5; }
+    .modal .close { margin-top: 16px; }
+
+    /* Report */
+    .results-title { margin: 0 0 4px; font-size: 20px; color: var(--accent);
+                     border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+    .scenario { font-size: 12.5px; color: var(--muted); margin: 8px 0 0;
+                font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-word; }
+    .section-h { font-size: 15px; font-weight: 700; margin: 22px 0 8px; }
+    .chart { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+    .charts-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 720px) { .charts-2 { grid-template-columns: 1fr; } }
+    table.data { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    table.data th, table.data td { border: 1px solid var(--line); padding: 5px 8px;
+            text-align: right; }
+    table.data th { background: #f0f4f7; }
+    table.data td.lbl, table.data th.lbl { text-align: left; }
+    .worst { margin-top: 10px; font-size: 13px; background: #fff3e0;
+             border: 1px solid #ffcc80; border-radius: 6px; padding: 8px 12px;
+             color: #5d4037; }
+    .tbl-head { display: flex; align-items: center; justify-content: space-between;
+                gap: 12px; flex-wrap: wrap; }
+    .scroll-y { max-height: 360px; overflow-y: auto; margin-top: 8px; }
+    footer { max-width: 1040px; margin: 0 auto 28px; padding: 0 16px;
              font-size: 11.5px; color: var(--muted); }
 
-    /* Header documentation links */
-    .doclinks { margin-top: 8px; font-size: 12.5px; }
-    .doclinks a { color: #fff; font-weight: 600; text-decoration: underline;
-                  margin-right: 14px; }
+    /* Shown only when printing (e.g. the disclosures at the end of the PDF). */
+    .print-only { display: none; }
+    .print-notes { margin-top: 24px; border-top: 1px solid var(--line);
+                   padding-top: 12px; font-size: 11px; line-height: 1.45;
+                   color: #333; }
+    .print-notes h3 { font-size: 13px; margin: 0 0 6px; }
 
-    /* Results section */
-    .results-title { margin: 0 0 12px; font-size: 20px; color: var(--accent);
-                     border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
-    .scenario { font-size: 13.5px; line-height: 1.5; background: #eef4ef;
-                border-left: 4px solid var(--accent); border-radius: 4px;
-                padding: 10px 14px; margin: 0 0 14px; word-break: break-word; }
-    .scenario strong { color: var(--accent); }
-    .ci-note { font-size: 13px; line-height: 1.5; color: var(--fg);
-               background: #fffaf0; border: 1px solid #f3e2bd;
-               border-radius: 6px; padding: 10px 14px; margin: 0 0 16px; }
-    .ci-note strong { color: #8a5a00; }
-    .report-heading { font-size: 14px; font-weight: 700; margin: 4px 0 6px;
-                      color: var(--fg); }
-    .docs-more { margin: 14px 0 0; font-size: 13px; }
-    .docs-more a { color: var(--accent); font-weight: 600; }
+    @media print {
+      .noprint { display: none !important; }
+      .print-only { display: block !important; }
+      body { background: #fff; }
+      header { background: #fff; color: #000; padding: 0 0 8px; }
+      main { margin: 0; max-width: none; }
+      .card { border: none; padding: 0; margin: 0 0 14px; }
+      .scroll-y { max-height: none; overflow: visible; }
+      .chart { border: none; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>Annuity-equivalent Monte Carlo</h1>
-    <p>Simulate equity-portfolio withdrawals against an annuity-equivalent income.
-       Local SOA-mortality pricing. Up to {{ "{:,}".format(max_sims) }} simulations,
-       {{ max_years }} years.</p>
-    <div class="doclinks">
-      <a href="/docs/methodology" target="_blank" rel="noopener">Methodology</a>
-      <a href="/docs/motivation" target="_blank" rel="noopener">Motivation</a>
+    <h1>Annuity-equivalent Monte Carlo &mdash; 100% equity</h1>
+    <p>Simulate a fully-invested equity portfolio that each year withdraws what a
+       life annuity would pay. Results in today's dollars.</p>
+    <div class="hint noprint" style="margin-top:8px;">
+      <a href="/docs/methodology" target="_blank" rel="noopener" style="color:#fff;font-weight:600;">Methodology</a>
+      &nbsp;&middot;&nbsp;
+      <a href="/docs/motivation" target="_blank" rel="noopener" style="color:#fff;font-weight:600;">Motivation</a>
     </div>
   </header>
 
   <main>
     {% if error %}
-      <div class="card error">{{ error }}</div>
+      <div class="card error noprint">{{ error }}</div>
     {% endif %}
 
-    <form class="card" method="post" action="/run" id="form">
+    <form class="card noprint" method="post" action="/run" id="form">
       <fieldset>
         <div class="grid">
-          <div><label>Amount ($)</label>
+          <div><label>Amount ($) <button type="button" class="help" data-help="amount">?</button></label>
             <input name="amount" value="{{ values.get('amount','') }}"></div>
-          <div><label>Simulations</label>
-            <input name="sims" value="{{ values.get('sims','') }}"></div>
-          <div><label>Age</label>
+          <div><label>Age <button type="button" class="help" data-help="age">?</button></label>
             <input name="age" value="{{ values.get('age','') }}"></div>
-          <div><label>Years</label>
+          <div><label>Years <button type="button" class="help" data-help="years">?</button></label>
             <input name="years" value="{{ values.get('years','') }}"></div>
-
-          <div><label>Gender</label>
+          <div><label>Gender <button type="button" class="help" data-help="gender">?</button></label>
             <select name="gender">
               {% for g in genders %}
               <option value="{{ g }}" {{ 'selected' if values.get('gender')==g }}>{{ g }}</option>
               {% endfor %}
             </select></div>
-          <div><label>Return sample</label>
+
+          <div><label>Return sample <button type="button" class="help" data-help="model">?</button></label>
             <select name="model">
               {% for m in models %}
               <option value="{{ m }}" {{ 'selected' if values.get('model')==m }}>{{ {'us':'United States','global':'Global (developed mkts)','postwar':'Global, post-WWII (1950+)'}.get(m, m) }}</option>
               {% endfor %}
             </select></div>
-          <div><label>State</label>
+          <div><label>State <button type="button" class="help" data-help="state">?</button></label>
             <select name="state">
               {% for s in states %}
               <option value="{{ s }}" {{ 'selected' if values.get('state')==s }}>{{ s }}</option>
               {% endfor %}
             </select></div>
-          <div><label>Block length (yrs)</label>
+          <div><label>Block length (yrs) <button type="button" class="help" data-help="block_length">?</button></label>
             <input name="block_length" value="{{ values.get('block_length','') }}"></div>
 
-          <div><label>Joint age <span class="hint">(opt.)</span></label>
+          <div><label>Joint age <button type="button" class="help" data-help="joint_age">?</button></label>
             <input name="joint_age" value="{{ values.get('joint_age','') }}"></div>
-          <div><label>Joint gender <span class="hint">(opt.)</span></label>
+          <div><label>Joint gender <button type="button" class="help" data-help="joint_gender">?</button></label>
             <select name="joint_gender">
               <option value="" {{ 'selected' if not values.get('joint_gender') }}>&mdash;</option>
               {% for g in genders %}
               <option value="{{ g }}" {{ 'selected' if values.get('joint_gender')==g }}>{{ g }}</option>
               {% endfor %}
             </select></div>
-          <div><label>Upper bound <span class="hint">(x, opt.)</span></label>
+          <div><label>Upper bound (x) <button type="button" class="help" data-help="upper_bound">?</button></label>
             <input name="upper_bound" value="{{ values.get('upper_bound','') }}"></div>
-          <div><label>Lower bound <span class="hint">(x, opt.)</span></label>
+          <div><label>Lower bound (x) <button type="button" class="help" data-help="lower_bound">?</button></label>
             <input name="lower_bound" value="{{ values.get('lower_bound','') }}"></div>
 
-          <div><label>Seed <span class="hint">(blank = random)</span></label>
+          <div><label>Seed <button type="button" class="help" data-help="seed">?</button></label>
             <input name="seed" value="{{ values.get('seed','') }}"></div>
-          <div><label>Inflation <span class="hint">(e.g. 0.025)</span></label>
+          <div><label>Inflation <button type="button" class="help" data-help="inflation">?</button></label>
             <input name="inflation" value="{{ values.get('inflation','') }}"></div>
-          <div><label>Interest rate <span class="hint">(e.g. 0.043)</span></label>
+          <div><label>Interest rate <button type="button" class="help" data-help="interest">?</button></label>
             <input name="interest" value="{{ values.get('interest','') }}"></div>
           <div></div>
         </div>
 
         <div class="checks">
           <label><input type="checkbox" name="dynamic" value="on"
-            {{ 'checked' if values.get('dynamic') }}> Dynamic inflation + rate</label>
+            {{ 'checked' if values.get('dynamic') }}> Dynamic inflation + rate
+            <button type="button" class="help" data-help="dynamic">?</button></label>
           <label><input type="checkbox" name="improvement" value="on"
-            {{ 'checked' if values.get('improvement') }}> Scale G2 mortality improvement</label>
+            {{ 'checked' if values.get('improvement') }}> Scale G2 mortality improvement
+            <button type="button" class="help" data-help="improvement">?</button></label>
         </div>
 
         <div class="actions">
@@ -156,54 +184,234 @@
 
     {% if report %}
     <div class="card">
-      <h2 class="results-title">Simulation Results with Confidence Intervals</h2>
+      <h2 class="results-title">Simulation Results</h2>
+      {% if params_line %}<p class="scenario">{{ params_line }}</p>{% endif %}
 
-      {% if params_line %}
-      <p class="scenario"><strong>Scenario:</strong> {{ params_line }}</p>
-      {% endif %}
-
-      <p class="ci-note">
-        A <strong>confidence interval (CI)</strong> is the range your ending
-        balance falls within across the simulated scenarios. For example, the
-        <strong>90% CI</strong> spans the middle 90% of outcomes &mdash; about 5%
-        of scenarios finish above that range and 5% below it. A wider interval
-        means more uncertainty in the result.
-      </p>
-
-      <div class="actions" style="margin-top:0;margin-bottom:14px;">
-        <form method="post" action="/export.pdf">
-          {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-          <button type="submit" class="secondary">Download PDF report</button>
-        </form>
-        <form method="post" action="/export.csv">
-          {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-          <button type="submit" class="secondary">Download CSV</button>
-        </form>
+      <div class="actions noprint" style="margin-top:12px;">
+        <button type="button" class="secondary" onclick="window.print()">Download PDF</button>
+        <button type="button" class="secondary" onclick="document.getElementById('notes-modal').style.display='flex'">Notes &amp; Disclosures</button>
       </div>
 
-      <p class="report-heading">Detailed report</p>
-      <div class="report">{{ report }}</div>
+      <!-- 1. Portfolio balance over time -->
+      <div class="section-h">Portfolio balance over time</div>
+      <img class="chart" src="{{ figs.balance }}" alt="Portfolio balance fan chart">
 
-      <p class="docs-more">Learn more:
-        <a href="/docs/methodology" target="_blank" rel="noopener">Methodology</a> &middot;
-        <a href="/docs/motivation" target="_blank" rel="noopener">Motivation</a>
-      </p>
+      <!-- 2. Portfolio summary: real, then nominal -->
+      <div class="section-h">Portfolio summary &mdash; real (today's dollars)</div>
+      <table class="data">
+        <thead><tr><th class="lbl">Metric</th>
+          {% for h in summary.headers %}<th>{{ h }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {% for row in summary.real %}
+          <tr><td class="lbl">{{ row.label }}</td>
+            {% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="section-h">Portfolio summary &mdash; nominal</div>
+      <table class="data">
+        <thead><tr><th class="lbl">Metric</th>
+          {% for h in summary.headers %}<th>{{ h }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {% for row in summary.nominal %}
+          <tr><td class="lbl">{{ row.label }}</td>
+            {% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="worst">
+        Worst single-year market loss (real): <strong>{{ summary.worst.one_yr }}</strong>
+        {% if summary.worst.five_yr %} &nbsp;&middot;&nbsp;
+        Worst 5-year market loss (real, cumulative): <strong>{{ summary.worst.five_yr }}</strong>{% endif %}
+        <span class="hint">&nbsp;(the market return itself, before withdrawals)</span>
+      </div>
+
+      <!-- 3. Simulated cashflows -->
+      <div class="section-h">Simulated annual withdrawals</div>
+      <img class="chart" src="{{ figs.cashflow }}" alt="Annual withdrawal fan chart">
+
+      <!-- 4. Distributions -->
+      <div class="section-h">Distributions</div>
+      <div class="charts-2">
+        <img class="chart" src="{{ figs.ending_hist }}" alt="Ending balance histogram">
+        <img class="chart" src="{{ figs.drawdown_hist }}" alt="Maximum drawdown histogram">
+      </div>
+
+      <!-- 5. Per-year withdrawal table -->
+      <div class="tbl-head" style="margin-top:22px;">
+        <div class="section-h" style="margin:0;">Withdrawals by year (today's dollars)</div>
+        <form class="noprint" method="post" action="/withdrawals.csv">
+          {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+          <button type="submit" class="secondary">Export table to CSV</button>
+        </form>
+      </div>
+      <div class="scroll-y">
+        <table class="data">
+          <thead><tr>
+            {% for h in wd_table.headers %}<th class="{{ 'lbl' if loop.index <= 2 }}">{{ h }}</th>{% endfor %}
+          </tr></thead>
+          <tbody>
+            {% for row in wd_table.rows %}
+            <tr><td class="lbl">{{ row.year }}</td><td class="lbl">{{ row.age }}</td>
+              {% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Notes & Disclosures: printed at the end of the PDF (hidden on screen,
+           where the same content is available via the button above). -->
+      <section class="print-only print-notes">
+        <h3>Notes &amp; Disclosures</h3>
+        <p><strong>For educational and informational purposes only — not
+        investment, tax, or legal advice.</strong> Appropriate decisions depend on
+        individual circumstances, which this tool does not consider.</p>
+        <p>The results are <strong>hypothetical</strong> and do not reflect any
+        actual investment. They come from a Monte Carlo simulation that resamples
+        historical annual returns (the chosen return sample) and applies the
+        assumptions entered above. The model is a <strong>100% equity</strong>
+        portfolio that each year withdraws what a life annuity would pay on the
+        current balance; it is not the purchase of an annuity — there is no income
+        guarantee and no mortality pooling, so the balance can be depleted.</p>
+        <p><strong>Past performance is not a guarantee of future results.</strong>
+        Historical samples may not represent the future; left-tail outcomes are
+        especially uncertain. Figures are in today's dollars unless labeled
+        nominal. The simulation does not model taxes, fees, transaction costs,
+        required minimum distributions, or rebalancing.</p>
+        <p>Return data: US S&amp;P 500 total return (Damodaran/NYU Stern) and
+        CPI-U (BLS); the global and post-WWII samples use the
+        Jordà–Schularick–Taylor Macrohistory Database (used under CC BY-NC-SA
+        4.0). Software is provided under the Mozilla Public License 2.0, without
+        warranty of any kind — license:
+        <a href="https://www.mozilla.org/en-US/MPL/2.0/">https://www.mozilla.org/en-US/MPL/2.0/</a>.</p>
+      </section>
     </div>
     {% endif %}
   </main>
 
   <footer>
-    Educational projection only &mdash; not financial advice. Results depend on the
-    assumptions you enter and the historical return model selected.
+    Educational projection only &mdash; not financial advice. A 100% equity
+    portfolio that spends the annuity-equivalent amount; results depend on your
+    inputs and the historical return sample chosen.
   </footer>
 
+  <!-- Notes &amp; Disclosures modal -->
+  <div class="modal-backdrop" id="notes-modal">
+    <div class="modal">
+      <h3>Notes &amp; Disclosures</h3>
+      <div class="body" style="white-space:normal;">
+        <p><strong>For educational and informational purposes only — not
+        investment, tax, or legal advice.</strong> Appropriate decisions depend on
+        your individual circumstances, which this tool does not consider.</p>
+        <p>The results are <strong>hypothetical</strong> and do not reflect any
+        actual investment. They come from a Monte Carlo simulation that resamples
+        historical annual returns (the chosen return sample) and applies the
+        assumptions you entered. The model is a <strong>100% equity</strong>
+        portfolio that each year withdraws what a life annuity <em>would</em> pay
+        on the current balance; it is <strong>not</strong> the purchase of an
+        annuity — there is no income guarantee and no mortality pooling, so the
+        balance can be depleted.</p>
+        <p><strong>Past performance is not a guarantee of future results.</strong>
+        Historical samples may not represent the future; left-tail outcomes are
+        especially uncertain. All figures are shown in today's dollars unless
+        labeled nominal.</p>
+        <p>The simulation does <strong>not</strong> model taxes, advisory or fund
+        fees, transaction costs, required minimum distributions, or rebalancing.
+        Annuity-equivalent withdrawals are priced from SOA mortality tables (or,
+        optionally, live quotes) at a discount rate you set and omit insurer
+        loads. Equity returns are restated to a constant-inflation basis except in
+        the US-only dynamic mode.</p>
+        <p>Return data: US S&amp;P 500 total return (Damodaran/NYU Stern) and
+        CPI-U (BLS); the global and post-WWII samples use the
+        <strong>Jordà–Schularick–Taylor Macrohistory Database</strong> (used under
+        CC BY-NC-SA 4.0). See the
+        <a href="/docs/methodology" target="_blank" rel="noopener">Methodology</a>
+        for full details and references.</p>
+        <p>Software is provided under the Mozilla Public License 2.0, without
+        warranty of any kind:
+        <a href="/license" target="_blank" rel="noopener">view license</a>.</p>
+      </div>
+      <div class="actions"><button type="button" class="primary"
+        onclick="document.getElementById('notes-modal').style.display='none'">Close</button></div>
+    </div>
+  </div>
+
+  <!-- Help modal -->
+  <div class="modal-backdrop" id="help-modal">
+    <div class="modal">
+      <h3 id="help-title">Help</h3>
+      <div class="body" id="help-body"></div>
+      <div class="actions"><button type="button" class="primary close" onclick="closeHelp()">Close</button></div>
+    </div>
+  </div>
+
   <script>
-    // Give immediate feedback while the (synchronous) simulation runs.
     var form = document.getElementById('form');
     if (form) form.addEventListener('submit', function () {
       document.getElementById('runbtn').disabled = true;
       document.getElementById('running').style.display = 'inline';
     });
+
+    var HELP = {
+      amount: {title: "Amount", body:
+        "The starting amount invested, in today's dollars. The whole projection scales with it, so it mainly sets the units — the percentages and success picture are the same at any size."},
+      age: {title: "Age", body:
+        "Your current age (40–90). It selects the mortality table used to price the annuity-equivalent withdrawal: at older ages there are fewer expected years left, so the payout rate — and the starting withdrawal — is higher."},
+      gender: {title: "Gender", body:
+        "Used only to pick the mortality table (women live longer on average, so a slightly lower payout rate). It has no effect on the market simulation."},
+      joint_age: {title: "Joint age", body:
+        "Optional second person. With a joint annuitant the withdrawal is priced as a last-survivor annuity — it has to last until the second death — so the payout rate is lower (more conservative) than for a single life. Leave blank for one person."},
+      joint_gender: {title: "Joint gender", body:
+        "The second person's gender, required if you enter a joint age. Like the primary, it only selects a mortality table."},
+      state: {title: "State", body:
+        "Only used if you choose live 'site' quotes, where insurer payouts vary by state of residence. With the default local pricing it is ignored — any value is fine."},
+      years: {title: "Years", body:
+        "How many years to project. Choose enough to cover a long life rather than just average life expectancy — e.g. 35 years from age 65 reaches age 100 — so you are stress-testing for longevity."},
+      model: {title: "Return sample", body:
+        "Which history of stock-market returns the simulation draws from. This app models a 100% equity (stock) portfolio and shows everything in today's dollars.\n\n• United States — US stock history only (S&P 500, 1928–2025). Familiar, but the US has been unusually successful, so this is the most optimistic choice.\n\n• Global (default) — a broad sample of developed countries (1871–2020). The US was an outlier among them, so a worldwide sample is a more cautious, realistic guide to the future. It includes severe outcomes the US never had (e.g. Germany and Japan around WWII).\n\n• Global, post-WWII — the same global sample but only 1950 onward, on the view that the modern post-war global order is more relevant than the era of world wars and hyperinflations before it. It lands between the US and full Global samples.\n\nNote: 'Dynamic inflation + rate' works ONLY with the United States sample, because that interest-rate model is fitted to US data. It is disabled for Global and Post-WWII."},
+      block_length: {title: "Block length", body:
+        "Returns are sampled in consecutive multi-year blocks rather than one year at a time, which preserves real-world momentum, mean-reversion, and multi-year inflation streaks — the 'sequence-of-returns' risk that matters most in retirement. Longer blocks keep more of that structure; 5 years is a typical choice."},
+      upper_bound: {title: "Upper bound (spending cap)", body:
+        "A cap on annual spending, as a multiple of the first year's withdrawal in today's dollars (e.g. 1.5 = never spend more than 150% of year one). Because spending is recomputed on the current balance each year, strong markets would otherwise keep pushing it up; the cap preserves capital after good markets — leaving more invested for later years and for a bequest. Blank = no cap."},
+      lower_bound: {title: "Lower bound (spending floor)", body:
+        "A floor on annual spending, as a multiple of the first year's withdrawal. It keeps spending from dropping below, say, 60% of year one even in bad markets, protecting your standard of living — but forcing withdrawals above what the balance can support makes running out of money more likely. Blank = no floor."},
+      seed: {title: "Seed", body:
+        "Leave blank for a fresh random draw each run. Enter a whole number to reproduce the exact same set of scenarios — useful when you want to change one other input and compare apples to apples."},
+      inflation: {title: "Inflation", body:
+        "In constant mode, the assumed yearly inflation used to convert results to today's dollars. Today's-dollar results barely change with this number (each scenario's returns are restated to match it); it mainly affects the nominal-dollar figures. Ignored when 'Dynamic inflation + rate' is on. Blank = 0%."},
+      interest: {title: "Interest rate", body:
+        "The interest/discount rate used to price the annuity-equivalent withdrawal under local pricing. A higher rate means a higher payout and larger withdrawals. With 'Dynamic inflation + rate' on, this is just the starting rate. The default is roughly the current 10-year Treasury yield."},
+      dynamic: {title: "Dynamic inflation + rate", body:
+        "Instead of a fixed inflation and interest rate, simulate them year by year: each scenario gets its own inflation path and a discount rate that evolves with it (an error-correction model fitted to US data).\n\nThis is available ONLY with the United States return sample — the rate model is US-specific, so it is disabled for the Global and Post-WWII samples, which always use constant inflation."},
+      improvement: {title: "Scale G2 mortality improvement", body:
+        "Projects expected future improvements in longevity (people living longer) onto the 2012 mortality tables. Because lives are assumed longer, the payout is a little lower — a more conservative, forward-looking assumption. Local pricing only."}
+    };
+    document.querySelectorAll('.help').forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        e.preventDefault();
+        var h = HELP[b.dataset.help] || {title: 'Help', body: ''};
+        document.getElementById('help-title').textContent = h.title;
+        document.getElementById('help-body').textContent = h.body;
+        document.getElementById('help-modal').style.display = 'flex';
+      });
+    });
+    function closeHelp() { document.getElementById('help-modal').style.display = 'none'; }
+    function closeModals() {
+      document.querySelectorAll('.modal-backdrop').forEach(function (m) {
+        m.style.display = 'none';
+      });
+    }
+    document.querySelectorAll('.modal-backdrop').forEach(function (m) {
+      m.addEventListener('click', function (e) { if (e.target === this) m.style.display = 'none'; });
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModals(); });
   </script>
 </body>
 </html>

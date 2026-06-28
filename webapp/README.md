@@ -7,9 +7,14 @@ shared and untouched.
 
 What it exposes:
 
-* a single-page input form mirroring the desktop GUI's fields,
-* the text report rendered in the page,
-* **Download PDF** (the consolidated graphical report) and **Download CSV**.
+* a single-page input form mirroring the desktop GUI's fields, with a help
+  pop-up next to each input explaining what it does and how it affects results;
+* a graphical results report rendered in the page (server-side matplotlib PNGs):
+  a portfolio-balance fan chart, a percentile summary table (1/5/10/50/90/95/98),
+  a withdrawal fan chart, ending-balance and max-drawdown histograms, and a
+  per-year withdrawal table — all in today's dollars;
+* **Download PDF** (the browser prints the on-page report) and **Export table to
+  CSV** (the per-year withdrawal table).
 
 It is built for a **public, no-auth** deployment, so it differs from the desktop
 app in three deliberate ways:
@@ -44,7 +49,8 @@ visitor/geolocation tracking (GoAccess).
 | Path                              | Purpose                                  |
 |-----------------------------------|------------------------------------------|
 | `app.py`                          | Flask app: routes, validation, caps      |
-| `templates/index.html`            | the form + results page                  |
+| `figures.py`                      | matplotlib report charts (base64 PNGs)   |
+| `templates/index.html`            | the form + results page + help/print JS  |
 | `requirements-web.txt`            | engine + web stack dependencies          |
 | `gunicorn_conf.py`                | gunicorn worker/timeout config           |
 | `deploy/montecarlo-web.service`   | systemd unit                             |
