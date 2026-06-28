@@ -110,7 +110,7 @@ Second life's gender. Must be given together with \fB--joint-age\fR.
 .TP
 .BI --interest " RATE"
 Flat annual interest rate as a decimal fraction (e.g. \fB0.04\fR for 4%). Default
-\fB0.035\fR.
+\fB0.043\fR.
 .TP
 .B --improvement
 Apply Scale G2 mortality improvement (generational projection to the quote year).
@@ -146,7 +146,7 @@ mortality (annuitants live longer than the general population). The model applie
 no insurer expense, profit, or interest-rate load, so at a given interest rate it
 prices a clean actuarial benchmark, not a marketed quote.
 .IP \(bu 2
-At the default 3.5% the model pays noticeably less than current market quotes;
+At the default 4.3% the model pays slightly less than current market quotes;
 empirically it matches immediateannuities.com at roughly 5% interest, i.e. the
 site's current quotes imply about a 5% pricing rate. Use
 .B --compare
@@ -159,7 +159,7 @@ The table's top age (120) is treated as certain death, so the survival curve
 terminates there.
 .SH EXAMPLES
 .PP
-Single-life annuity for a 65-year-old male, $100,000, default 3.5%:
+Single-life annuity for a 65-year-old male, $100,000, default 4.3%:
 .PP
 .RS
 .nf

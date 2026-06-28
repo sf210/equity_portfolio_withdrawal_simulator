@@ -137,7 +137,7 @@ and \fB--improvement\fR. \fBsite\fR fetches live immediateannuities.com quotes
 .TP
 .BI --interest " RATE"
 Flat annual interest rate for local pricing, as a decimal fraction. Used only
-with \fB--quotes local\fR. Default \fB0.035\fR.
+with \fB--quotes local\fR. Default \fB0.043\fR.
 .TP
 .B --improvement
 Apply SOA Projection Scale G2 mortality improvement (generational projection to
@@ -220,8 +220,8 @@ sequence of early returns.
 .IP \(bu 2
 With \fB--quotes local\fR (the default) payouts are priced from the SOA 2012 IAM
 mortality tables at a flat \fB--interest\fR rate, with no insurer expense or
-profit load; the local pricer handles any age. At the default 3.5% it is
-conservative relative to current market quotes (which imply roughly 5%); see
+profit load; the local pricer handles any age. At the default 4.3% it is
+slightly below current market quotes (which imply roughly 5%); see
 \fBannuity_pricing\fR(1).
 .IP \(bu 2
 With \fB--quotes site\fR, payouts are "Average Estimated Quotes" scraped live
@@ -234,7 +234,7 @@ A single invocation is one random path. Run with a fixed
 for reproducibility; use the Monte Carlo driver for confidence intervals.
 .SH EXAMPLES
 .PP
-A reproducible single-life projection (local pricing at the default 3.5%):
+A reproducible single-life projection (local pricing at the default 4.3%):
 .PP
 .RS
 .nf

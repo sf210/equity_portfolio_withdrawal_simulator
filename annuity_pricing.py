@@ -68,7 +68,7 @@ import os
 import re
 import sys
 
-DEFAULT_INTEREST = 0.035
+DEFAULT_INTEREST = 0.043  # ~ current 10-year Treasury yield; matches the GUI/web default
 PAYMENTS_PER_YEAR = 12  # monthly income, matching immediateannuities.com
 # Woolhouse 2-term adjustment from annual annuity-immediate to m-thly: (m-1)/(2m).
 _WOOLHOUSE_ADJ = (PAYMENTS_PER_YEAR - 1) / (2 * PAYMENTS_PER_YEAR)

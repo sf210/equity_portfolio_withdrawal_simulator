@@ -185,7 +185,7 @@ The simulator supports two ways of handling inflation:
 
 - **Constant** (default). Inflation is a single assumption (`--inflation`, default
   **2.5%**), used only to deflate results to today's dollars, and the annuity
-  discount rate is fixed (`--interest`, default 3.5%). To keep the equity series
+  discount rate is fixed (`--interest`, default 4.3%). To keep the equity series
   consistent with the constant assumption, each sampled year's *nominal* equity
   return is **restated** onto that basis — its embedded historical inflation is
   stripped out (preserving the real return) and the constant rate re-applied:
@@ -279,9 +279,10 @@ beyond it receive no further improvement.)
 The model carries **no insurer expense, profit, or interest-rate load**, so it is
 a clean actuarial benchmark rather than a marketed quote. Compared against live
 immediateannuities.com quotes [6] for ages 60/65/70/80, the model pays roughly
-**80–94%** of the site at the default 3.5% interest, and **matches the site at
-about 5%** interest. That ~5% is consistent with a current 10-year nominal yield
-of roughly a 2.3% real rate plus ~2.5% inflation (Section 8).
+**80–94%** of the site at 3.5% interest and **matches the site at about 5%**
+interest; at the **default 4.3%** it sits between these, slightly below parity.
+That ~5% is consistent with a current 10-year nominal yield of roughly a 2.3%
+real rate plus ~2.5% inflation (Section 8).
 
 ## 5. The withdrawal mechanism (one path)
 
