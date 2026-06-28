@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import shutil
 import tempfile
 import urllib.request
 
@@ -54,7 +55,13 @@ def main():
         tmp = tempfile.NamedTemporaryFile(suffix=".dta", delete=False)
         tmp.close()
         print(f"Downloading JST Macrohistory Database...\n  {JST_DTA_URL}")
-        urllib.request.urlretrieve(JST_DTA_URL, tmp.name)
+        # macrohistory.net rejects the default urllib User-Agent (HTTP 403), so
+        # send a browser-like one.
+        req = urllib.request.Request(
+            JST_DTA_URL, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=120) as resp, \
+                open(tmp.name, "wb") as out:
+            shutil.copyfileobj(resp, out)
         dta_path = tmp.name
 
     df = pd.read_stata(dta_path).sort_values(["country", "year"])
