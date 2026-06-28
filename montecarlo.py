@@ -427,9 +427,10 @@ def main(argv=None) -> int:
     p.add_argument("--inflation", type=float, default=wp.DEFAULT_INFLATION,
                    help="constant annual inflation rate as a decimal fraction, "
                         f"e.g. 0.025 for 2.5 percent (default {wp.DEFAULT_INFLATION})")
-    p.add_argument("--model", choices=("us", "global"),
+    p.add_argument("--model", choices=("us", "global", "postwar"),
                    default="global", help="equity return sample: 'us' (S&P 500 / "
-                   "CPI) or 'global' (broad developed markets, JST; default)")
+                   "CPI), 'global' (broad developed markets, JST; default), or "
+                   "'postwar' (the global sample restricted to 1950+)")
     p.add_argument("--block-length", type=int, default=5,
                    help="block size in years for the block bootstrap (default 5)")
     p.add_argument("--quotes", choices=("local", "site"), default=wp.DEFAULT_QUOTES,

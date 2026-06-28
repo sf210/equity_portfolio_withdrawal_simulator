@@ -105,7 +105,7 @@
           <div><label>Return sample</label>
             <select name="model">
               {% for m in models %}
-              <option value="{{ m }}" {{ 'selected' if values.get('model')==m }}>{{ {'us':'United States','global':'Global (developed mkts)'}.get(m, m) }}</option>
+              <option value="{{ m }}" {{ 'selected' if values.get('model')==m }}>{{ {'us':'United States','global':'Global (developed mkts)','postwar':'Global, post-WWII (1950+)'}.get(m, m) }}</option>
               {% endfor %}
             </select></div>
           <div><label>State</label>

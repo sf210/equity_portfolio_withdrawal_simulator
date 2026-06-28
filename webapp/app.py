@@ -70,7 +70,7 @@ SLOT_TIMEOUT = float(os.environ.get("MC_SLOT_TIMEOUT", "10"))
 _SIM_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT)
 
 # Equity-return sample offered (the engine also knows these); local pricing only.
-MODELS = ["us", "global"]
+MODELS = ["us", "global", "postwar"]
 GENDERS = ["M", "F"]
 STATES = sorted(annuity_quote.STATES)
 

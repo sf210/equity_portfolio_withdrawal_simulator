@@ -42,8 +42,11 @@ class GlobalDataMissing(FileNotFoundError):
     """Raised when the derived global-returns CSV has not been generated yet."""
 
 
-def load() -> dict:
+def load(min_year: int | None = None) -> dict:
     """Load the per-country return series.
+
+    If `min_year` is given, only year-pairs from that year onward are kept (used
+    by the post-WWII sample).
 
     Returns a dict:
       {"series": [(country, ndarray(n, 2) of [equity_frac, infl_frac]), ...],
@@ -69,6 +72,8 @@ def load() -> dict:
                 eq = float(row["eq_pct"]) / 100.0
                 infl = float(row["infl_pct"]) / 100.0
             except (KeyError, ValueError):
+                continue
+            if min_year is not None and year < min_year:
                 continue
             by_country.setdefault(row["country"], []).append((year, eq, infl))
 

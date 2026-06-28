@@ -124,7 +124,7 @@ class MonteCarloGUI:
 
         row(2, 0, "Gender"); self.gender = combo(2, 0, ["M", "F"], "M")
         row(2, 2, "Model")
-        self.model = combo(2, 2, ["us", "global"], "global")
+        self.model = combo(2, 2, ["us", "global", "postwar"], "global")
 
         row(3, 0, "State")
         self.state = combo(3, 0, sorted(annuity_quote.STATES), "FL")

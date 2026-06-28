@@ -28,6 +28,13 @@ outcomes (Pfau 2010). Two data sources are offered:
                the distribution. Requires the JST-derived data file; see
                global_market_data.py / fetch_global_data.py.
 
+  "postwar" -- the same broad developed-market sample restricted to 1950 and
+               later. Rationale: the post-WWII global order (Bretton Woods, no
+               great-power war among developed economies, modern central banking)
+               is arguably a better guide to the future than the 1870-1945 era of
+               world wars and hyperinflations. Trades a longer history for a more
+               regime-relevant one.
+
 Interface:
 
     model = JointReturnModel("global", block_length=5)
@@ -42,13 +49,16 @@ import numpy as np
 
 import market_data
 
-MODES = ("us", "global")
+MODES = ("us", "global", "postwar")
+
+# First year included by the post-WWII sample.
+POSTWAR_MIN_YEAR = 1950
 
 
 class JointReturnModel:
     def __init__(self, mode: str = "us", block_length: int = 5):
         if mode not in MODES:
-            raise ValueError(f"unknown mode {mode!r}; use 'us' or 'global'")
+            raise ValueError(f"unknown mode {mode!r}; use {', '.join(MODES)}")
         if block_length < 1:
             raise ValueError("block_length must be >= 1")
         self.mode = mode
@@ -62,12 +72,14 @@ class JointReturnModel:
             self._series = [np.column_stack([eq, infl])]
             self._span = f"{market_data.YEARS[0]}-{market_data.YEARS[-1]}"
             self._source = "US S&P 500 / CPI"
-        else:
+        else:  # "global" or "postwar": broad developed-market sample.
             import global_market_data
-            gm = global_market_data.load()
+            min_year = POSTWAR_MIN_YEAR if mode == "postwar" else None
+            gm = global_market_data.load(min_year=min_year)
             self._series = [arr for _name, arr in gm["series"]]
             self._span = f"{gm['year_min']}-{gm['year_max']}"
-            self._source = (f"global developed markets, "
+            era = "post-WWII " if mode == "postwar" else ""
+            self._source = (f"{era}global developed markets, "
                             f"{gm['n_countries']} countries (JST)")
 
         lengths = np.array([len(a) for a in self._series], dtype=float)
