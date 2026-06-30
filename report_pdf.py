@@ -8,18 +8,18 @@
 One document, in this order, from the raw per-path arrays collected by
 montecarlo.build_report (the report_data dict):
 
-  1. Summary cards (page 1, top) -- the ending-balance distribution in today's
-     and nominal dollars (mean, median, 80/90/95/99% central intervals, plus the
-     worst real equity returns), and a highlighted downside line, styled as
-     header-barred cards rather than plain text.
-  2. The end-of-year balance fan chart (page 1, below the cards): the median plus
-     central-interval bands, shaded green above the median and red below it and
-     darkening toward the tails so the unfavourable region draws the eye, on a
-     pseudo-log (symlog) y-axis so depletion to zero is visible.
+  1. A summary table (page 1, top) -- in today's (real) and nominal dollars, the
+     ending balance, total return (annualized geometric mean), and mean annual
+     withdrawal across the 1/5/25/50/75/95/99 percentiles, with the worst real
+     equity returns and a highlighted downside line. This matches webapp/app.py.
+  2. The end-of-year balance fan chart (page 1, below the table): the median plus
+     the 25/75, 5/95 and 1/99 percentile bands, shaded green above the median and
+     red below it and darkening toward the tails so the unfavourable region draws
+     the eye, on a pseudo-log (symlog) y-axis so depletion to zero is visible.
   3. A "Median and Stress Scenarios" section: for the path whose ending balance
-     sits at the median, 10th, 2.5th, and 0.5th percentile, a dual-axis chart of
-     that path's market return, inflation, and annuity discount rate by year,
-     with its mean/min/max annual withdrawal (today's dollars) and ending balance.
+     sits at the median, 25th, 5th, and 1st percentile, a dual-axis chart of that
+     path's market return, inflation, and annuity discount rate by year, with its
+     mean/min/max annual withdrawal (today's dollars) and ending balance.
   4. A paginated per-year simulation-summary table (balance percentiles + median
      withdrawal).
 
@@ -41,33 +41,32 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Patch, Rectangle
 
-# Central-interval percentiles, from the worst tail up to the best.
-_PCTS = [0.5, 2.5, 5.0, 10.0, 50.0, 90.0, 95.0, 97.5, 99.5]
+# Percentiles shown throughout the report (mirrors webapp/app.py + figures.py).
+PCTS = [1, 5, 25, 50, 75, 95, 99]
+PCT_HEADERS = ["1st", "5th", "25th", "Median", "75th", "95th", "99th"]
+
+# Percentiles needed to draw the fan bands, worst tail up to the best.
+_PCTS = [1.0, 5.0, 25.0, 50.0, 75.0, 95.0, 99.0]
 
 # Green shades for the bands above the median (light near the median, dark far);
 # red shades for the bands below it. Each list runs nearest -> furthest.
-_GREENS = ["#c8e6c9", "#81c784", "#43a047", "#1b5e20"]
-_REDS = ["#ffcdd2", "#e57373", "#e53935", "#b71c1c"]
+_GREENS = ["#a5d6a7", "#66bb6a", "#2e7d32"]
+_REDS = ["#ef9a9a", "#e57373", "#c62828"]
 
 # Pairs of (inner, outer) percentile bounding each shaded band.
-_UPPER_PAIRS = [(50.0, 90.0), (90.0, 95.0), (95.0, 97.5), (97.5, 99.5)]
-_LOWER_PAIRS = [(50.0, 10.0), (10.0, 5.0), (5.0, 2.5), (2.5, 0.5)]
-
-# Confidence level -> (lower percentile, upper percentile) for the summary cards.
-_CI_BANDS = [(80, (10.0, 90.0)), (90, (5.0, 95.0)),
-             (95, (2.5, 97.5)), (99, (0.5, 99.5))]
+_UPPER_PAIRS = [(50.0, 75.0), (75.0, 95.0), (95.0, 99.0)]
+_LOWER_PAIRS = [(50.0, 25.0), (25.0, 5.0), (5.0, 1.0)]
 
 # The four representative scenarios: label -> ending-balance percentile.
 _SCENARIOS = [
     ("Median", 50.0),
-    ("10th percentile", 10.0),
-    ("2.5th percentile", 2.5),
-    ("0.5th percentile", 0.5),
+    ("25th percentile", 25.0),
+    ("5th percentile", 5.0),
+    ("1st percentile", 1.0),
 ]
 
-# Accent colours for the two summary cards.
-_REAL_ACCENT = "#1b5e20"
-_NOM_ACCENT = "#37474f"
+def _ord(p: float) -> str:
+    return "1st" if p == 1 else f"{p:g}th"  # our percentiles only need this case
 
 
 def _money(v: float) -> str:
@@ -84,13 +83,9 @@ def _money_axis(x, _pos) -> str:
     return _money(x)
 
 
-def _balance_stats(values: np.ndarray) -> dict:
-    """Mean, median, and the central-interval bounds for an outcome array."""
-    s = {"mean": float(values.mean()), "median": float(np.median(values))}
-    for level, (lo, hi) in _CI_BANDS:
-        s[level] = (float(np.percentile(values, lo)),
-                    float(np.percentile(values, hi)))
-    return s
+def _pcts(values: np.ndarray) -> list:
+    """The PCTS percentiles of a 1-D outcome array, as plain floats."""
+    return [float(np.percentile(values, p)) for p in PCTS]
 
 
 def _scenario_indices(end_real: np.ndarray):
@@ -111,62 +106,61 @@ def _scenario_indices(end_real: np.ndarray):
 # Summary cards
 # --------------------------------------------------------------------------- #
 
-def _real_card_rows(data):
-    s = _balance_stats(data["end_real"])
-    rows = [("Mean", _money(s["mean"]), False),
-            ("Median", _money(s["median"]), True)]
-    for level, _ in _CI_BANDS:
-        lo, hi = s[level]
-        rows.append((f"{level}% CI", f"{_money(lo)} – {_money(hi)}", False))
-    rows.append(("Worst 1-yr real return", f"{data['worst_1yr']:.1%}", False))
-    if data["worst_5yr"] is not None:
-        rows.append(("Worst 5-yr real (cum.)", f"{data['worst_5yr']:.1%}", False))
-    return rows
+def _summary_rows(data):
+    """The six summary rows (real then nominal: balance, return, withdrawal).
+
+    Each row is (label, [seven percentile-cell strings]); money for balance and
+    withdrawal, percentage for the annualized geometric-mean total return.
+    """
+    eq, infl = data["equities"], data["inflations"]
+    n = eq.shape[1]
+    total_real = np.prod((1.0 + eq) / (1.0 + infl), axis=1) ** (1.0 / n) - 1.0
+    total_nom = np.prod(1.0 + eq, axis=1) ** (1.0 / n) - 1.0
+    wd_real = data["payouts_real"].mean(axis=1)
+    wd_nom = data["payouts_nominal"].mean(axis=1)
+
+    def money(a):
+        return [_money(v) for v in _pcts(a)]
+
+    def pct(a):
+        return [f"{v * 100:.1f}%" for v in _pcts(a)]
+
+    return [
+        ("Real — Ending balance", money(data["end_real"])),
+        ("Real — Total return (geo)", pct(total_real)),
+        ("Real — Mean withdrawal", money(wd_real)),
+        ("Nominal — Ending balance", money(data["end_nom"])),
+        ("Nominal — Total return (geo)", pct(total_nom)),
+        ("Nominal — Mean withdrawal", money(wd_nom)),
+    ]
 
 
-def _nom_card_rows(data):
-    s = _balance_stats(data["end_nom"])
-    rows = [("Mean", _money(s["mean"]), False),
-            ("Median", _money(s["median"]), True)]
-    for level, _ in _CI_BANDS:
-        lo, hi = s[level]
-        rows.append((f"{level}% CI", f"{_money(lo)} – {_money(hi)}", False))
-    return rows
-
-
-def _summary_card(fig, rect, title, rows, accent):
-    """Draw one header-barred summary card with label/value rows."""
+def _summary_grid(fig, rect, data):
+    """Draw the real/nominal percentile summary table into `rect`."""
     ax = fig.add_axes(rect)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
     ax.axis("off")
-    tr = ax.transAxes
-    header_h = 0.16
+    rows = _summary_rows(data)
+    cell_text = [[label] + cells for label, cells in rows]
+    col_labels = [""] + PCT_HEADERS
 
-    # Card body + coloured header bar.
-    ax.add_patch(Rectangle((0, 0), 1, 1, facecolor="white", edgecolor="#cfcfcf",
-                           lw=1.0, transform=tr, clip_on=False, zorder=1))
-    ax.add_patch(Rectangle((0, 1 - header_h), 1, header_h, facecolor=accent,
-                           edgecolor="none", transform=tr, clip_on=False,
-                           zorder=2))
-    ax.text(0.035, 1 - header_h / 2, title, color="white", fontsize=10.5,
-            fontweight="bold", va="center", ha="left", transform=tr, zorder=3)
-
-    # Evenly spaced rows below the header; alternate a faint zebra stripe.
-    top = 1 - header_h
-    n = len(rows)
-    row_h = top / n
-    for i, (label, value, emph) in enumerate(rows):
-        y_bottom = top - (i + 1) * row_h
-        if i % 2 == 1:
-            ax.add_patch(Rectangle((0, y_bottom), 1, row_h, facecolor="#f5f5f5",
-                                   edgecolor="none", transform=tr, zorder=1.5))
-        yc = y_bottom + row_h / 2
-        weight = "bold" if emph else "normal"
-        ax.text(0.04, yc, label, fontsize=9, va="center", ha="left",
-                transform=tr, fontweight=weight, zorder=3)
-        ax.text(0.96, yc, value, fontsize=9, va="center", ha="right",
-                transform=tr, family="monospace", fontweight=weight, zorder=3)
+    tbl = ax.table(cellText=cell_text, colLabels=col_labels, loc="center",
+                   cellLoc="right", colLoc="center")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(8.5)
+    tbl.scale(1.0, 1.5)
+    for (r, c), cell in tbl.get_celld().items():
+        cell.set_edgecolor("#dddddd")
+        # Give the row-label column more room than the seven data columns.
+        cell.set_width(0.26 if c == 0 else 0.74 / len(PCT_HEADERS))
+        if r == 0:  # header row
+            cell.set_facecolor("#37474f")
+            cell.set_text_props(color="white", fontweight="bold")
+        elif c == 0:  # row-label column: real rows green, nominal rows grey
+            real = r <= 3
+            cell.set_facecolor("#1b5e20" if real else "#eceff1")
+            cell.set_text_props(ha="left", fontweight="bold",
+                                color="white" if real else "black")
+        cell.PAD = 0.03
 
 
 def _downside_strip(fig, rect, text):
@@ -222,9 +216,9 @@ def _draw_fan(ax, data):
                    label="starting amount"),
     ]
     for (inner, outer), color in zip(reversed(_UPPER_PAIRS), reversed(_GREENS)):
-        handles.append(Patch(color=color, label=f"{outer:g}th pct"))
+        handles.append(Patch(color=color, label=f"{_ord(outer)} pct"))
     for (inner, outer), color in zip(_LOWER_PAIRS, _REDS):
-        handles.append(Patch(color=color, label=f"{outer:g}th pct"))
+        handles.append(Patch(color=color, label=f"{_ord(outer)} pct"))
     ax.legend(handles=handles, loc="upper left", fontsize=8, ncol=2,
               framealpha=0.9)
 
@@ -238,12 +232,13 @@ def _summary_fan_page(pdf, data):
     fig.text(0.06, 0.92, data["params_line"], ha="left", fontsize=9,
              family="monospace", color="#333333")
 
-    _summary_card(fig, [0.06, 0.595, 0.42, 0.275],
-                  "Ending balance — today's dollars",
-                  _real_card_rows(data), _REAL_ACCENT)
-    _summary_card(fig, [0.52, 0.595, 0.42, 0.275],
-                  "Ending balance — nominal dollars",
-                  _nom_card_rows(data), _NOM_ACCENT)
+    _summary_grid(fig, [0.06, 0.60, 0.88, 0.27], data)
+
+    worst = f"Worst 1-yr real return: {data['worst_1yr']:.1%}"
+    if data["worst_5yr"] is not None:
+        worst += f"     Worst 5-yr real return (cumulative): {data['worst_5yr']:.1%}"
+    fig.text(0.06, 0.585, worst, ha="left", fontsize=9, color="#333333")
+
     _downside_strip(fig, [0.06, 0.525, 0.88, 0.045], data["downside"])
 
     ax = fig.add_axes([0.085, 0.075, 0.85, 0.40])
@@ -327,8 +322,8 @@ def _table_pages(pdf, data, rows_per_page=24):
     years = balances.shape[1]
     age = data["age"]
 
-    header = ["Yr", "Age", "Balance\nmedian", "Balance\n10th",
-              "Balance\n2.5th", "Withdrawal\nmedian"]
+    header = ["Yr", "Age", "Balance\nmedian", "Balance\n25th",
+              "Balance\n5th", "Withdrawal\nmedian"]
     table_rows = []
     for t in range(years):
         b = balances[:, t]
@@ -336,8 +331,8 @@ def _table_pages(pdf, data, rows_per_page=24):
         table_rows.append([
             str(t + 1), str(age + t),
             _money(np.median(b)),
-            _money(np.percentile(b, 10)),
-            _money(np.percentile(b, 2.5)),
+            _money(np.percentile(b, 25)),
+            _money(np.percentile(b, 5)),
             _money(np.median(w)),
         ])
 

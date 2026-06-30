@@ -288,8 +288,8 @@ def _hidden_fields(params: dict) -> dict:
 # Report building: summary table, per-year withdrawal table, worst-loss lines.
 # --------------------------------------------------------------------------- #
 # Percentiles shown throughout the report.
-PCTS = [1, 5, 10, 50, 90, 95, 98]
-PCT_HEADERS = ["1st", "5th", "10th", "Median", "90th", "95th", "98th"]
+PCTS = [1, 5, 25, 50, 75, 95, 99]
+PCT_HEADERS = ["1st", "5th", "25th", "Median", "75th", "95th", "99th"]
 
 
 def _money(v: float) -> str:

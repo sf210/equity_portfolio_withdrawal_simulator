@@ -6,7 +6,7 @@
 
 Everything is in **real (today's-dollar)** terms. The fan charts use the same
 green-above / red-below shaded-percentile style as the desktop PDF report, with
-the percentile bands the web UI asks for (1/5/10/50/90/95/98). Imported lazily by
+the percentile bands the web UI asks for (1/5/25/50/75/95/99). Imported lazily by
 app.py only when a report is rendered, so matplotlib stays off the import path
 for the rest of the app.
 """
@@ -26,11 +26,11 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.ticker import FuncFormatter  # noqa: E402
 
 # Percentiles shown, worst tail -> best.
-PCTS = [1, 5, 10, 50, 90, 95, 98]
+PCTS = [1, 5, 25, 50, 75, 95, 99]
 
 # Bands as (inner, outer) percentile pairs, nearest the median first.
-_UPPER = [(50, 90), (90, 95), (95, 98)]
-_LOWER = [(50, 10), (10, 5), (5, 1)]
+_UPPER = [(50, 75), (75, 95), (95, 99)]
+_LOWER = [(50, 25), (25, 5), (5, 1)]
 _GREENS = ["#a5d6a7", "#66bb6a", "#2e7d32"]   # light -> dark, above median
 _REDS = ["#ef9a9a", "#e57373", "#c62828"]     # light -> dark, below median
 
@@ -173,10 +173,10 @@ def build_figures(data: dict) -> dict:
     fig, ax = plt.subplots(figsize=(10, 4.2))
     _fan(ax, data["payouts_real"], "Annual withdrawal — today's dollars")
     ax.set_ylabel("Withdrawal (today's $)")
-    # Linear axis sized to the data (98th-pct band) with clear headroom, so the
+    # Linear axis sized to the data (99th-pct band) with clear headroom, so the
     # top band is never clipped. Determined per run, so the scale varies with the
     # inputs.
-    top = float(np.percentile(data["payouts_real"], 98, axis=0).max())
+    top = float(np.percentile(data["payouts_real"], 99, axis=0).max())
     ax.set_ylim(0, top * 1.15)
     figs["cashflow"] = _png(fig)
 

@@ -3,21 +3,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-"""Monte Carlo confidence intervals for the annuity-equivalent withdrawal model.
+"""Monte Carlo percentile report for the annuity-equivalent withdrawal model.
 
 Runs many random paths of withdrawal_projection.simulate_path (default 5000) and
-reports, for both the ending balance and the yearly payout (annual = monthly x
-12), the mean, median, and the 80% / 90% / 95% / 99% confidence intervals. The
-payout table is reported in today's dollars (deflated by cumulative inflation).
+reports, in both today's (real) and nominal dollars, a summary table (ending
+balance, total return as an annualized geometric mean, and the mean annual
+withdrawal) and a per-year withdrawal table -- each across the 1st / 5th / 25th /
+median / 75th / 95th / 99th percentiles of the simulated outcomes. This matches
+the web front end (webapp/app.py) exactly. The withdrawal figures are reported in
+today's dollars (deflated by cumulative inflation).
 
-A "C% confidence interval" here is the central interval covering C% of the
-simulated outcomes, i.e. the [(100-C)/2, 100-(100-C)/2] percentile range:
-  80% -> [10th, 90th]   90% -> [5th, 95th]
-  95% -> [2.5th, 97.5th]  99% -> [0.5th, 99.5th]
-
-The ending-balance (today's dollars) block also reports the worst single-year and
-worst cumulative 5-year *real* (inflation-adjusted) equity total return seen
-anywhere in the simulation.
+The summary also reports the worst single-year and worst cumulative 5-year *real*
+(inflation-adjusted) equity total return seen anywhere in the simulation.
 
 Annuity payouts are priced by default from the local SOA-table model
 (annuity_pricing, offline); --quotes site uses live immediateannuities.com
@@ -54,25 +51,32 @@ import rate_model
 import withdrawal_projection as wp
 from equity_model import JointReturnModel
 
-# confidence level -> (lower percentile, upper percentile)
-CI_BANDS = {
-    80: (10.0, 90.0),
-    90: (5.0, 95.0),
-    95: (2.5, 97.5),
-    99: (0.5, 99.5),
-}
+# Percentiles shown throughout the report (mirrors webapp/app.py and figures.py).
+PCTS = [1, 5, 25, 50, 75, 95, 99]
+PCT_HEADERS = ["1st", "5th", "25th", "Median", "75th", "95th", "99th"]
 
-# Width of one CI band cell as rendered below, "{:>10,.0f}-{:<11,.0f}" = 10+1+11.
-_BAND_W = 22
+# Text-table column widths: the row-label column and each percentile column.
+_LABEL_W = 24
+_COL_W = 11
 
 
-def summarize(values: np.ndarray) -> dict:
-    """Mean, median, and the central CI bounds for a 1-D array of outcomes."""
-    out = {"mean": float(values.mean()), "median": float(np.median(values))}
-    for level, (lo, hi) in CI_BANDS.items():
-        out[level] = (float(np.percentile(values, lo)),
-                      float(np.percentile(values, hi)))
-    return out
+def _pcts(arr: np.ndarray) -> list:
+    """The PCTS percentiles of a 1-D outcome array, as plain floats."""
+    return [float(np.percentile(arr, p)) for p in PCTS]
+
+
+def _money(v: float) -> str:
+    """Compact dollar label, e.g. $1.24M / $930k / $0 (matches the web)."""
+    a = abs(v)
+    if a >= 1e6:
+        return f"${v / 1e6:,.2f}M"
+    if a >= 1e3:
+        return f"${v / 1e3:,.0f}k"
+    return f"${v:,.0f}"
+
+
+def _pct_str(frac: float, decimals: int = 0) -> str:
+    return f"{frac * 100:,.{decimals}f}%"
 
 
 def run(amount, age, gender, state, joint_age, joint_gender,
@@ -179,27 +183,33 @@ def worst_real_returns(equities, inflations, window=5):
     return worst_1yr, worst_window
 
 
-def _balance_block_lines(title, values, extras=None):
-    """Text lines for one ending-balance summary block."""
-    s = summarize(values)
-    lines = [
-        title,
-        f"  mean       ${s['mean']:>14,.0f}",
-        f"  median     ${s['median']:>14,.0f}",
-    ]
-    for level in (80, 90, 95, 99):
-        lo, hi = s[level]
-        lines.append(f"  {level}% CI     ${lo:>14,.0f}  -  ${hi:>14,.0f}")
-    if extras:
-        lines.extend(extras)
+def _pct_table_lines(title, header_cells, rows):
+    """Text lines for a percentile table: a label column + the PCTS columns."""
+    lines = [title]
+    head = " " * _LABEL_W + "".join(f"{h:>{_COL_W}}" for h in header_cells)
+    lines.append(head)
+    lines.append("-" * len(head))
+    for label, cells in rows:
+        lines.append(f"{label:<{_LABEL_W}}"
+                     + "".join(f"{c:>{_COL_W}}" for c in cells))
     return lines
 
 
+def _summary_block_lines(title, end_vals, total_returns, wd_vals):
+    """One summary block (ending balance, total return, mean withdrawal)."""
+    rows = [
+        ("Ending balance", [_money(v) for v in _pcts(end_vals)]),
+        ("Total return (geo mean)", [_pct_str(v, 1) for v in _pcts(total_returns)]),
+        ("Mean annual withdrawal", [_money(v) for v in _pcts(wd_vals)]),
+    ]
+    return _pct_table_lines(title, PCT_HEADERS, rows)
+
+
 def _worst_return_lines(worst_1yr, worst_5yr):
-    """Extra lines (in today's dollars / real terms) for the real balance block."""
-    lines = [f"  worst 1-yr real return  {worst_1yr:>7.1%}"]
+    """The worst real single-year / cumulative 5-year equity-return lines."""
+    lines = [f"Worst 1-yr real return: {worst_1yr:.1%}"]
     if worst_5yr is not None:
-        lines.append(f"  worst 5-yr real return  {worst_5yr:>7.1%}  (cumulative)")
+        lines.append(f"Worst 5-yr real return: {worst_5yr:.1%}  (cumulative)")
     return lines
 
 
@@ -216,21 +226,23 @@ def geo_mean_return(equities, inflations=None):
 
 
 def _payout_table_lines(title, payouts, age):
-    """Text lines for the per-year payout confidence-interval table."""
+    """Text lines for the per-year withdrawal table: mean, median, percentiles."""
     years = payouts.shape[1]
+    extra = [p for p in PCTS if p != 50]  # median shown in its own column
+    headers = (["Yr", "Age", "Mean", "Median"]
+               + [("1st" if p == 1 else f"{p}th") for p in extra])
     lines = [title]
-    hdr = (f"{'Yr':>2} {'Age':>3} {'Mean':>11} {'Median':>11} "
-           + " ".join(f"{lbl:^{_BAND_W}}"
-                      for lbl in ("80% CI", "90% CI", "95% CI", "99% CI")))
+    hdr = (f"{headers[0]:>3} {headers[1]:>3} {headers[2]:>10} {headers[3]:>10} "
+           + " ".join(f"{h:>10}" for h in headers[4:]))
     lines.append(hdr)
     lines.append("-" * len(hdr))
     for t in range(years):
-        s = summarize(payouts[:, t])
-        bands = " ".join(
-            f"{s[lvl][0]:>10,.0f}-{s[lvl][1]:<11,.0f}" for lvl in (80, 90, 95, 99)
-        )
+        col = payouts[:, t]
+        cells = " ".join(f"{_money(float(np.percentile(col, p))):>10}"
+                         for p in extra)
         lines.append(
-            f"{t+1:>2} {age+t:>3} {s['mean']:>11,.0f} {s['median']:>11,.0f} {bands}"
+            f"{t+1:>3} {age+t:>3} {_money(float(col.mean())):>10} "
+            f"{_money(float(np.median(col))):>10} {cells}"
         )
     return lines
 
@@ -240,40 +252,47 @@ def _payout_table_lines(title, payouts, age):
 # CSV writer below is self-contained (standard library only).
 # --------------------------------------------------------------------------- #
 
-def _summary_row(label, s):
-    row = [label, round(s["mean"]), round(s["median"])]
-    for lvl in (80, 90, 95, 99):
-        row += [round(s[lvl][0]), round(s[lvl][1])]
-    return row
+def _summary_csv_rows(end_vals, total_returns, wd_vals):
+    """The three summary rows (ending balance, total return, mean withdrawal)."""
+    return [
+        ["ending balance"] + [round(v) for v in _pcts(end_vals)],
+        ["total return (geo mean)"] + [f"{v:.4f}" for v in _pcts(total_returns)],
+        ["mean annual withdrawal"] + [round(v) for v in _pcts(wd_vals)],
+    ]
 
 
 def write_csv(path, *, header_line, params_line, end_real, end_nom,
-              worst_1yr, worst_5yr, geo_real, geo_nom,
-              payout_title, payout, age):
-    """Write the ending-balance summary and per-year payout table to CSV."""
-    ci_cols = ["ci80_lo", "ci80_hi", "ci90_lo", "ci90_hi",
-               "ci95_lo", "ci95_hi", "ci99_lo", "ci99_hi"]
+              total_real, total_nom, wd_real, wd_nom,
+              worst_1yr, worst_5yr, payout, age):
+    """Write the percentile summary (real + nominal) and per-year withdrawals."""
+    pct_cols = [f"p{p}" for p in PCTS]
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow([header_line])
         w.writerow([params_line])
         w.writerow([])
-        w.writerow(["Ending balance summary"])
-        w.writerow(["basis", "mean", "median"] + ci_cols)
-        w.writerow(_summary_row("today's dollars", summarize(end_real)))
-        w.writerow(_summary_row("nominal dollars", summarize(end_nom)))
+        w.writerow(["Summary - today's dollars (real)"])
+        w.writerow(["metric"] + pct_cols)
+        for row in _summary_csv_rows(end_real, total_real, wd_real):
+            w.writerow(row)
         w.writerow([])
-        w.writerow(["total return real (geo mean, median)", f"{geo_real:.4f}"])
-        w.writerow(["total return nominal (geo mean, median)", f"{geo_nom:.4f}"])
+        w.writerow(["Summary - nominal dollars"])
+        w.writerow(["metric"] + pct_cols)
+        for row in _summary_csv_rows(end_nom, total_nom, wd_nom):
+            w.writerow(row)
+        w.writerow([])
         w.writerow(["worst 1-yr real return", f"{worst_1yr:.4f}"])
         if worst_5yr is not None:
             w.writerow(["worst 5-yr real return (cumulative)", f"{worst_5yr:.4f}"])
         w.writerow([])
-        w.writerow([payout_title])
-        w.writerow(["year", "age", "mean", "median"] + ci_cols)
+        extra = [p for p in PCTS if p != 50]
+        w.writerow(["Annual withdrawal by year - today's dollars (real)"])
+        w.writerow(["year", "age", "mean", "median"] + [f"p{p}" for p in extra])
         for t in range(payout.shape[1]):
-            stats = _summary_row("", summarize(payout[:, t]))
-            w.writerow([t + 1, age + t] + stats[1:])
+            col = payout[:, t]
+            w.writerow([t + 1, age + t, round(float(col.mean())),
+                        round(float(np.median(col)))]
+                       + [round(float(np.percentile(col, p))) for p in extra])
 
 
 def _prompt_and_export(csv_kwargs, report_data):
@@ -342,8 +361,12 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     elapsed = time.time() - t0
 
     worst_1yr, worst_5yr = worst_real_returns(equities, inflations)
-    geo_real = float(np.median(geo_mean_return(equities, inflations)))
-    geo_nom = float(np.median(geo_mean_return(equities)))
+    # Per-path distributions for the summary table (percentiles taken below):
+    # annualized geometric-mean total return and mean annual withdrawal.
+    total_real = geo_mean_return(equities, inflations)
+    total_nom = geo_mean_return(equities)
+    wd_real = pay_real.mean(axis=1)
+    wd_nom = pay_nom.mean(axis=1)
 
     model_summary = jrm.summary()
     bounds_bits = []
@@ -372,20 +395,18 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
         + bounds_note
         + f")   [{elapsed:.1f}s]")
 
-    real_block = _balance_block_lines(
-        "Ending balance - today's dollars", end_real,
-        extras=([f"  total return (geo mean) {geo_real:>7.1%}  (median)"]
-                + _worst_return_lines(worst_1yr, worst_5yr)))
-    nom_block = _balance_block_lines(
-        "Ending balance - nominal dollars", end_nom,
-        extras=[f"  total return (geo mean) {geo_nom:>7.1%}  (median)"])
+    real_block = _summary_block_lines(
+        "Summary - today's dollars (real)", end_real, total_real, wd_real)
+    nom_block = _summary_block_lines(
+        "Summary - nominal dollars", end_nom, total_nom, wd_nom)
+    worst_lines = _worst_return_lines(worst_1yr, worst_5yr)
 
     pct_below_start = 100.0 * np.mean(end_real < amount)
     pct_below_half = 100.0 * np.mean(end_real < amount * 0.5)
     downside = (f"Paths ending below starting amount (real): {pct_below_start:.1f}%   "
                 f"below half of it: {pct_below_half:.1f}%")
 
-    payout_title = "Annual payout by year - today's dollars"
+    payout_title = "Annual withdrawal by year - today's dollars"
     payout = pay_real
     payout_lines = _payout_table_lines(payout_title, payout, age)
 
@@ -393,7 +414,8 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     report_lines = (
         [model_summary, "", params_line, ""]
         + real_block + [""]
-        + nom_block + ["", downside, ""]
+        + nom_block + [""]
+        + worst_lines + ["", downside, ""]
         + payout_lines
     )
     report_text = "\n".join(report_lines)
@@ -405,9 +427,10 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
     csv_kwargs = dict(
         header_line=footer_text, params_line=params_line,
         end_real=end_real, end_nom=end_nom,
+        total_real=total_real, total_nom=total_nom,
+        wd_real=wd_real, wd_nom=wd_nom,
         worst_1yr=worst_1yr, worst_5yr=worst_5yr,
-        geo_real=geo_real, geo_nom=geo_nom,
-        payout_title=payout_title, payout=payout, age=age,
+        payout=payout, age=age,
     )
     report_data = dict(
         title="Annuity-equivalent Monte Carlo report",
@@ -429,7 +452,7 @@ def build_report(amount, age, gender, state, joint_age, joint_gender,
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
-        description="Monte Carlo confidence intervals for the annuity-equivalent "
+        description="Monte Carlo percentile report for the annuity-equivalent "
         "withdrawal projection."
     )
     p.add_argument("amount", type=annuity_quote._normalize_amount,
@@ -445,7 +468,7 @@ def main(argv=None) -> int:
                    default=None, help="optional joint beneficiary gender (M/F)")
     p.add_argument("--sims", type=int, default=5000,
                    help="number of simulated paths (default 5000)")
-    p.add_argument("--years", type=int, default=30, help="years to project (default 30)")
+    p.add_argument("--years", type=int, default=35, help="years to project (default 35)")
     p.add_argument("--inflation", type=float, default=wp.DEFAULT_INFLATION,
                    help="constant annual inflation rate as a decimal fraction, "
                         f"e.g. 0.025 for 2.5 percent (default {wp.DEFAULT_INFLATION})")
@@ -458,11 +481,13 @@ def main(argv=None) -> int:
     p.add_argument("--quotes", choices=("local", "site"), default=wp.DEFAULT_QUOTES,
                    help="annuity pricing source: local SOA-table model (offline, "
                         f"default) or live immediateannuities.com (default {wp.DEFAULT_QUOTES})")
-    p.add_argument("--interest", type=float, default=annuity_pricing.DEFAULT_INTEREST,
+    p.add_argument("--interest", type=float, default=rate_model.DEFAULT_INITIAL_RATE,
                    help="flat interest rate for --quotes local "
-                        f"(default {annuity_pricing.DEFAULT_INTEREST})")
-    p.add_argument("--improvement", action="store_true",
-                   help="apply Scale G2 mortality improvement (--quotes local only)")
+                        f"(default {rate_model.DEFAULT_INITIAL_RATE})")
+    p.add_argument("--improvement", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="apply Scale G2 mortality improvement (--quotes local "
+                        "only; on by default, use --no-improvement to disable)")
     p.add_argument("--quote-year", type=int, default=None,
                    help="year to project mortality to for --improvement (default: current)")
     p.add_argument("--dynamic-rates", action="store_true",
@@ -472,9 +497,9 @@ def main(argv=None) -> int:
     p.add_argument("--initial-rate", type=float, default=rate_model.DEFAULT_INITIAL_RATE,
                    help="starting 10-year rate for --dynamic-rates "
                         f"(default {rate_model.DEFAULT_INITIAL_RATE})")
-    p.add_argument("--upper-bound", type=float, default=None,
+    p.add_argument("--upper-bound", type=float, default=1.5,
                    help="cap annual withdrawal at this factor of year-1's "
-                        "withdrawal, in today's dollars (e.g. 1.2)")
+                        "withdrawal, in today's dollars (default 1.5)")
     p.add_argument("--lower-bound", type=float, default=None,
                    help="floor annual withdrawal at this factor of year-1's "
                         "withdrawal, in today's dollars (e.g. 0.5)")
